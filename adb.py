@@ -18,8 +18,8 @@
 
 
 import errno
+import os
 import subprocess
-import posixpath
 
 
 ###############################################################################
@@ -52,16 +52,33 @@ ADB_ENV = {
 # FIXME: all of it
 
 
-class ADBCommandError(subprocess.CalledProcessError):
-    """Base class for ADB process errors."""
+class ADBError(Exception):
+    """Base class for ADB errors."""
+
+    def __init__(self, errno, cmd, output=None):
+        self.returncode = errno
+        self.cmd = cmd
+        self.output = output or None
 
     def __str__(self):
         """."""
         return self.output
 
 
-class ConnectionError(ADBCommandError):
-    """."""
+class ADBWarning(Warning):
+    """Base class for ADB errors which the adb tool does not treat as fatal."""
+
+    def __init__(self, errno, errmsg):
+        self.errno = errno
+        self.errmsg = errmsg
+
+class ConnectionError(ADBError):
+    """Class for errors connecting and disconnecting from TCP/IP devices."""
+    pass
+
+
+class SyncError(ADBWarning):
+    """Class for errors during sync()."""
     pass
 
 
@@ -88,28 +105,26 @@ class ADBCommand(subprocess.Popen):
                                       stderr=subprocess.STDOUT,
                                       universal_newlines=True)
         except OSError as exc:
-            if exc.errno == 2:
-                errmsg = 'adb binary "%s" not found' % ADB_PATH
-            else:
-                errmsg = exc.strerror
-
-            raise ADBCommandError(exc.errno, errmsg)
+            raise ADBError(exc.errno, ' '.join(cmd_line), exc.strerror)
 
 
-def _clean_output(raw_output):
-    """return output data as a list of lines."""
-    return raw_output.splitlines()
+def output(*args):
+    """."""
+
+    with ADBCommand(*args, stdout=subprocess.PIPE) as proc:
+        stdout = proc.communicate()[0].splitlines()
+
+    return [line for line in stdout if not line.startswith('*')]
 
 
 def check_output(*args):
     """Slightly modified subprocess.check_output()"""
 
     with ADBCommand(*args, stdout=subprocess.PIPE) as proc:
-
         stdout = proc.communicate()[0].splitlines()
 
         if proc.wait():
-            raise ADBCommandError(proc.returncode, ' '.join(args), '\n'.join(stdout))
+            raise ADBError(proc.returncode, ' '.join(args), '\n'.join(stdout))
 
     return [line for line in stdout if not line.startswith('*')]
 
@@ -134,9 +149,11 @@ def connect(host, port=5555):
 
     for line in check_output('connect', ':'.join([host, str(port)])):
         if line.startswith('unable to connect to '):
-            raise ConnectionError(errno.EHOSTUNREACH, 'connect', line[:-5])
+            return errno.EHOSTUNREACH
+        if line.startswith('already connected to '):
+            return errno.EISCONN
 
-    return True
+    return 0
 
 
 #FIXME: sketchy error handling
@@ -154,7 +171,9 @@ def disconnect(host=None, port=5555):
 
     for line in check_output(*args):
         if line.startswith('No such device'):
-            raise ConnectionError(errno.ENOTCONN, ' '.join(args), line)
+            return errno.ENXIO
+
+    return 0
 
 
 # Device Commands
@@ -183,6 +202,7 @@ def sync(directory=None, list_only=False):
     run.
     """
     args = ['sync']
+    output = {}
 
     if list_only:
         args.append('-l')
@@ -190,23 +210,28 @@ def sync(directory=None, list_only=False):
     if directory:
         args.append(directory)
 
-    output = check_output(*args)
+    proc = ADBCommand(*args, stdout=subprocess.PIPE)
+    stdout = proc.communicate()[0].splitlines()
 
-    indices = [output.index(l) for l in output if l.startswith('syncing')]
+    if proc.wait():
+        error = True
 
-    poutput = {}
+    for line in stdout:
+        if line.startswith('syncing'):
+            output[line[9:-3]] = []
 
-    for index in indices:
-        list_start = index + 1
+            for transaction in stdout[stdout.index(line) + 1:]:
+                if 'files pushed' in transaction:
+                    break
+                elif 'push:' in transaction:
+                    transaction = transaction.lstrip('would ')
+                    transaction = transaction.lstrip('push: ')
 
-        if len(indices) > indices.index(index):
-            list_end = output.index(indices[1]) - 1
-        else:
-            list_end = len(output) - 1
+                    output[line[9:-3]].append(transaction)
+                else:
+                    raise ADBError(proc.returncode, ' '.join(args), os.strerror(proc.returncode))
 
-        poutput[output[index][9:-3]] = output[index + 1:list_end]
-
-    return poutput
+    return output
 
 
 #FIXME
@@ -375,7 +400,6 @@ def ppp(local, remote):
 
 if __name__ == '__main__':
     connect('192.168.1.102')
-    print(devices())
 
     print(sync(list_only=True))
 

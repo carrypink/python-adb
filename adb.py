@@ -17,7 +17,7 @@
 # Copyright 2012 Andrew Holmes <andrew.g.r.holmes@gmail.com>
 
 
-import os
+import errno
 import subprocess
 import posixpath
 
@@ -38,7 +38,7 @@ ANDROID_LOG_TAGS = ''
 
 ANDROID_PRODUCT_OUT = '/home/andrew/Downloads/Android'
 
-ADB_ENVIRON = {
+ADB_ENV = {
     #'ADB_TRACE': ADB_TRACE,
     #'ANDROID_SERIAL': ANDROID_SERIAL,
     #'ANDROID_LOG_TAGS': ANDROID_LOG_TAGS,
@@ -52,7 +52,7 @@ ADB_ENVIRON = {
 # FIXME: all of it
 
 
-class ADBProcessError(Exception, subprocess.CalledProcessError):
+class ADBCommandError(subprocess.CalledProcessError):
     """Base class for ADB process errors."""
 
     def __str__(self):
@@ -60,8 +60,40 @@ class ADBProcessError(Exception, subprocess.CalledProcessError):
         return self.output
 
 
+class ConnectionError(ADBCommandError):
+    """."""
+    pass
+
+
 # Base function
 ###############################################################################
+
+
+class ADBCommand(subprocess.Popen):
+    """."""
+
+    def __init__(self, *args, stdout=None, stdin=None, product=None):
+        """."""
+
+        try:
+            cmd_line = [ADB_PATH]
+            [cmd_line.append(arg) for arg in args]
+
+            subprocess.Popen.__init__(self,
+                                      cmd_line,
+                                      env=ADB_ENV,
+                                      stdin=stdin,
+                                      stdout=stdout,
+                                      # seems to arbitrarily print to stderr
+                                      stderr=subprocess.STDOUT,
+                                      universal_newlines=True)
+        except OSError as exc:
+            if exc.errno == 2:
+                errmsg = 'adb binary "%s" not found' % ADB_PATH
+            else:
+                errmsg = exc.strerror
+
+            raise ADBCommandError(exc.errno, errmsg)
 
 
 def _clean_output(raw_output):
@@ -69,31 +101,15 @@ def _clean_output(raw_output):
     return raw_output.splitlines()
 
 
-def check_output(*args, **kwargs):
+def check_output(*args):
     """Slightly modified subprocess.check_output()"""
-    try:
-        cmd_line = [ADB_PATH]
-        [cmd_line.append(arg) for arg in args]
 
-        proc = subprocess.Popen(cmd_line,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT,
-                                env=ADB_ENVIRON,
-                                universal_newlines=True,
-                                **kwargs)
+    with ADBCommand(*args, stdout=subprocess.PIPE) as proc:
 
         stdout = proc.communicate()[0].splitlines()
 
-    except OSError as exc:
-        if exc.errno == 2:
-            errmsg = 'adb binary "%s" not found' % ADB_PATH
-        else:
-            errmsg = exc.strerror
-
-        raise ADBProcessError(exc.errno, errmsg)
-
-    if proc.wait():
-        raise ADBProcessError(proc.returncode, ' '.join(args), stdout)
+        if proc.wait():
+            raise ADBCommandError(proc.returncode, ' '.join(args), '\n'.join(stdout))
 
     return [line for line in stdout if not line.startswith('*')]
 
@@ -118,7 +134,7 @@ def connect(host, port=5555):
 
     for line in check_output('connect', ':'.join([host, str(port)])):
         if line.startswith('unable to connect to '):
-            raise ConnectionError(line)
+            raise ConnectionError(errno.EHOSTUNREACH, 'connect', line[:-5])
 
     return True
 
@@ -138,7 +154,7 @@ def disconnect(host=None, port=5555):
 
     for line in check_output(*args):
         if line.startswith('No such device'):
-            raise ConnectionError(line)
+            raise ConnectionError(errno.ENOTCONN, ' '.join(args), line)
 
 
 # Device Commands
@@ -184,9 +200,11 @@ def sync(directory=None, list_only=False):
         list_start = index + 1
 
         if len(indices) > indices.index(index):
-            pass
+            list_end = output.index(indices[1]) - 1
+        else:
+            list_end = len(output) - 1
 
-        poutput[output[index][9:-3]] = output[index + 1:len(output) - 1]
+        poutput[output[index][9:-3]] = output[index + 1:list_end]
 
     return poutput
 
@@ -194,21 +212,21 @@ def sync(directory=None, list_only=False):
 #FIXME
 def shell(*args):
     """run remote shell command."""
-    with ADBProcess(args, interactive=True) as proc:
+    with ADBCommand(args, interactive=True) as proc:
         pass
 
 
 #FIXME
 def emu(*args):
     """run emulator console command."""
-    with ADBProcess(args, interactive=True) as proc:
+    with ADBCommand(args, interactive=True) as proc:
         pass
 
 
 #FIXME
 def logcat(filter_spec=None):
     """View device log."""
-    with ADBProcess(args, interactive=True) as proc:
+    with ADBCommand(args, interactive=True) as proc:
         pass
 
 
@@ -263,7 +281,7 @@ def install(filename, lock=False, reinstall=False, sdcard=False,
         cmd.append('--iv')
         cmd.append(encryption[2])
 
-    with ADBProcess(*cmd) as proc:
+    with ADBCommand(*cmd) as proc:
         return proc.lines
 
 
@@ -279,7 +297,7 @@ def uninstall(filename, keep=False):
     if keep:
         cmd.append('-k')
 
-    return ADBProcess(*cmd)
+    return ADBCommand(*cmd)
 
 
 #FIXME: major output 3Mb+
@@ -287,7 +305,7 @@ def bugreport():
     """Return a string containing all information from the device that should
     be included in a bug report.
     """
-    return ADBProcess('bugreport').lines
+    return ADBCommand('bugreport').lines
 
 
 #FIXME
@@ -313,7 +331,7 @@ def restore(file):
 
 def version():
     """Return version number as a string."""
-    return ADBProcess('version').lines[0][29:]
+    return ADBCommand('version').lines[0][29:]
 
 
 # Scripting
@@ -359,6 +377,6 @@ if __name__ == '__main__':
     connect('192.168.1.102')
     print(devices())
 
-    print(sync(directory='system', list_only=True))
+    print(sync(list_only=True))
 
     disconnect('192.168.1.102')

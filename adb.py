@@ -19,13 +19,14 @@
 
 import errno
 import os
+import shutil
 import subprocess
 
 
 ###############################################################################
 # Constants
 
-ADB_PATH = 'adb'
+ADB_PATH = shutil.which('adb')
 
 # Environmental Variables
 # FIXME: Negotiate with os.environ

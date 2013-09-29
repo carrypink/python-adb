@@ -29,22 +29,20 @@ import subprocess
 ADB_PATH = shutil.which('adb')
 
 # Environmental Variables
-# FIXME: Negotiate with os.environ
-
-ADB_TRACE = ''
-ANDROID_SERIAL = ''
-ANDROID_LOG_TAGS = ''
-
-# Other Environmental Variables ??? FIXME
-
-ANDROID_PRODUCT_OUT = '/home/andrew/Downloads/Android'
+# FIXME: Negotiate with os.environ (http://stackoverflow.com/questions/2231227/python-subprocess-popen-with-a-modified-environment)
 
 ADB_ENV = {
-    #'ADB_TRACE': ADB_TRACE,
-    #'ANDROID_SERIAL': ANDROID_SERIAL,
-    #'ANDROID_LOG_TAGS': ANDROID_LOG_TAGS,
+    # Print debug information. A comma separated list of the following values
+    # 1 or all, adb, sockets, packets, rwx, usb, sync, sysdeps, transport, jdwp
+    'ADB_TRACE': None,
+    
+    # The serial number to connect to. -s takes priority over this if given.
+    'ANDROID_SERIAL': None,
+    
+    # When used with the logcat option, only these debug tags are printed.
+    'ANDROID_LOG_TAGS': None,
 
-    'ANDROID_PRODUCT_OUT': ANDROID_PRODUCT_OUT
+    'ANDROID_PRODUCT_OUT': '/home/andrew/Downloads/Android'
 }
 
 
@@ -63,7 +61,7 @@ class ADBError(Exception):
 
     def __str__(self):
         """."""
-        return self.output
+        return ''.join([self.output])
 
 
 class ADBWarning(Warning):
@@ -94,6 +92,7 @@ class ADBCommand(subprocess.Popen):
         """."""
 
         try:
+            #FIXME wtf, use join() and var*
             cmd_line = [ADB_PATH]
             [cmd_line.append(arg) for arg in args]
 
@@ -400,8 +399,9 @@ def ppp(local, remote):
 
 
 if __name__ == '__main__':
-    connect('192.168.1.102')
+    print(ADB_PATH)
+    connect('192.168.0.11')
 
     print(sync(list_only=True))
 
-    disconnect('192.168.1.102')
+    disconnect('192.168.0.11')

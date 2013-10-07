@@ -16,6 +16,13 @@
 
 # Copyright 2012 Andrew Holmes <andrew.g.r.holmes@gmail.com>
 
+r"""adb - A python wrapper for the Android Debugging Bridge
+
+This module is meant as a pure wrapper for the 'adb' binary, primarily to wrap
+its commands as functions and raise errors as python exceptions.
+
+"""
+
 
 import errno
 import os
@@ -42,6 +49,9 @@ ADB_ENV = {
     # When used with the logcat option, only these debug tags are printed.
     'ANDROID_LOG_TAGS': None,
 
+    # A path to a product out directory like 'out/target/product/sooner'. If -p
+    # is not specified, the ANDROID_PRODUCT_OUT environment variable is used,
+    # which must be an absolute path.
     'ANDROID_PRODUCT_OUT': '/home/andrew/Downloads/Android'
 }
 
@@ -101,7 +111,7 @@ class ADBCommand(subprocess.Popen):
                                       env=ADB_ENV,
                                       stdin=stdin,
                                       stdout=stdout,
-                                      # seems to arbitrarily print to stderr
+                                      # adb seems to arbitrarily print to stderr
                                       stderr=subprocess.STDOUT,
                                       universal_newlines=True)
         except OSError as exc:
@@ -126,6 +136,7 @@ def check_output(*args):
         if proc.wait():
             raise ADBError(proc.returncode, ' '.join(args), '\n'.join(stdout))
 
+    # Return a list of lines, stripping server start/stop messages
     return [line for line in stdout if not line.startswith('*')]
 
 
@@ -149,9 +160,11 @@ def connect(host, port=5555):
 
     for line in check_output('connect', ':'.join([host, str(port)])):
         if line.startswith('unable to connect to '):
-            return errno.EHOSTUNREACH
+            #return errno.EHOSTUNREACH
+            raise ConnectionError()
         if line.startswith('already connected to '):
-            return errno.EISCONN
+            #return errno.EISCONN
+            raise ConnectionError()
 
     return 0
 
@@ -234,8 +247,8 @@ def sync(directory=None, list_only=False):
     return output
 
 
-#FIXME
-def shell(*args):
+#FIXME: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+def shell(argstr):
     """run remote shell command."""
     with ADBCommand(args, interactive=True) as proc:
         pass
@@ -400,8 +413,5 @@ def ppp(local, remote):
 
 if __name__ == '__main__':
     print(ADB_PATH)
-    connect('192.168.0.11')
-
-    print(sync(list_only=True))
-
-    disconnect('192.168.0.11')
+    
+    print(connect('192.168.0.11'))

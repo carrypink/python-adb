@@ -37,23 +37,22 @@ ADB_PATH = shutil.which('adb')
 
 # Environmental Variables
 # FIXME: Negotiate with os.environ (http://stackoverflow.com/questions/2231227/python-subprocess-popen-with-a-modified-environment)
+# FIXME: shell=False so find away to avoid os.environ
 
-ADB_ENV = {
-    # Print debug information. A comma separated list of the following values
-    # 1 or all, adb, sockets, packets, rwx, usb, sync, sysdeps, transport, jdwp
-    'ADB_TRACE': None,
+# Print debug information. A comma separated list of the following values
+# 1 or all, adb, sockets, packets, rwx, usb, sync, sysdeps, transport, jdwp
+ADB_TRACE = None
     
-    # The serial number to connect to. -s takes priority over this if given.
-    'ANDROID_SERIAL': None,
+# The serial number to connect to. -s takes priority over this if given.
+ANDROID_SERIAL = None
     
-    # When used with the logcat option, only these debug tags are printed.
-    'ANDROID_LOG_TAGS': None,
+# When used with the logcat option, only these debug tags are printed.
+ANDROID_LOG_TAGS = None
 
-    # A path to a product out directory like 'out/target/product/sooner'. If -p
-    # is not specified, the ANDROID_PRODUCT_OUT environment variable is used,
-    # which must be an absolute path.
-    'ANDROID_PRODUCT_OUT': '/home/andrew/Downloads/Android'
-}
+# A path to a product out directory like 'out/target/product/sooner'. If -p
+# is not specified, the ANDROID_PRODUCT_OUT environment variable is used,
+# which must be an absolute path.
+ANDROID_PRODUCT_OUT = '/home/andrew/Downloads/Android'
 
 
 ###############################################################################
@@ -98,17 +97,16 @@ class SyncError(ADBWarning):
 class ADBCommand(subprocess.Popen):
     """."""
 
-    def __init__(self, *args, stdout=None, stdin=None, product=None):
+    def __init__(self, *opts, stdout=None, stdin=None, product=None):
         """."""
 
         try:
-            #FIXME wtf, use join() and var*
+            #FIXME wtf, this is ugly
             cmd_line = [ADB_PATH]
-            [cmd_line.append(arg) for arg in args]
+            [cmd_line.append(opt) for opt in opts]
 
             subprocess.Popen.__init__(self,
                                       cmd_line,
-                                      env=ADB_ENV,
                                       stdin=stdin,
                                       stdout=stdout,
                                       # adb seems to arbitrarily print to stderr
@@ -412,6 +410,7 @@ def ppp(local, remote):
 
 
 if __name__ == '__main__':
-    print(ADB_PATH)
     
-    print(connect('192.168.0.11'))
+    #print(connect('192.168.0.11'))
+    print(devices())
+    #ADBCommand('devices')

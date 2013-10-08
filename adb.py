@@ -19,7 +19,11 @@
 r"""adb - A python wrapper for the Android Debugging Bridge
 
 This module is meant as a pure wrapper for the 'adb' binary, primarily to wrap
-its commands as functions and raise errors as python exceptions.
+its commands as functions and raise errors as python exceptions.  The only class
+defined is ADBCommand(), a sub-class of subprocess.Popen().  Like the subclass
+module there are convenience functions for running custom ADB commands, but the
+intent is to provide functions with proper error handling and IO for each
+command.
 
 """
 
@@ -34,6 +38,12 @@ import subprocess
 # Constants
 
 ADB_PATH = shutil.which('adb')
+"""Location of the adb binary."""
+
+# Device States
+
+ADB_CONN_OFFLINE = 'offline'
+DEV_DEVICE = 'device'
 
 # Environmental Variables
 # FIXME: Negotiate with os.environ (http://stackoverflow.com/questions/2231227/python-subprocess-popen-with-a-modified-environment)
@@ -70,7 +80,7 @@ class ADBError(Exception):
 
     def __str__(self):
         """."""
-        return ''.join([self.output])
+        return self.output
 
 
 class ADBWarning(Warning):
@@ -98,7 +108,7 @@ class ADBCommand(subprocess.Popen):
     """."""
 
     def __init__(self, *opts, stdout=None, stdin=None, product=None):
-        """."""
+        """Warning: adb may print server start/stop messages to stdout."""
 
         try:
             #FIXME wtf, this is ugly
@@ -125,17 +135,48 @@ def output(*args):
     return [line for line in stdout if not line.startswith('*')]
 
 
-def check_output(*args):
-    """Slightly modified subprocess.check_output()"""
+# FIXME
+def check_output(*args, timeout=None, **kwargs):
+    r"""Run command with arguments and return its output.
 
-    with ADBCommand(*args, stdout=subprocess.PIPE) as proc:
-        stdout = proc.communicate()[0].splitlines()
+    If the exit code was non-zero it raises a CalledProcessError.  The
+    CalledProcessError object will have the return code in the returncode
+    attribute and output in the output attribute.
 
-        if proc.wait():
-            raise ADBError(proc.returncode, ' '.join(args), '\n'.join(stdout))
+    The arguments are the same as for the Popen constructor.  Example:
 
-    # Return a list of lines, stripping server start/stop messages
-    return [line for line in stdout if not line.startswith('*')]
+    >>> check_output(["ls", "-l", "/dev/null"])
+    b'crw-rw-rw- 1 root root 1, 3 Oct 18  2007 /dev/null\n'
+
+    The stdout argument is not allowed as it is used internally.
+    To capture standard error in the result, use stderr=STDOUT.
+
+    >>> check_output(["/bin/sh", "-c",
+    ...               "ls -l non_existent_file ; exit 0"],
+    ...              stderr=STDOUT)
+    b'ls: non_existent_file: No such file or directory\n'
+
+    If universal_newlines=True is passed, the return value will be a
+    string rather than bytes.
+    """
+    if 'stdout' in kwargs:
+        raise ValueError('stdout argument not allowed, it will be overridden.')
+    with ADBCommand(*args, stdout=subprocess.PIPE, **kwargs) as proc:
+        try:
+            output = proc.communicate(timeout=timeout)[0].splitlines()
+        except TimeoutExpired:
+            proc.kill()
+            output, unused_err = proc.communicate()
+            raise subprocess.TimeoutExpired(proc.args, timeout, output=output)
+        except:
+            proc.kill()
+            proc.wait()
+            raise
+            
+        if proc.poll():
+            raise subprocess.CalledProcessError(retcode, proc.args, output=output)
+            
+    return [line for line in output if not line.startswith('*')]
 
 
 
@@ -143,36 +184,38 @@ def check_output(*args):
 ###############################################################################
 
 
-#FIXME: see AAFM.py crazy ass regex
 def devices():
-    """Return a list of device/permissions pairs."""
+    """Return a list of device [identifier, state] pairs."""
 
     output = check_output('devices')
 
     return [line.split('\t') for line in output if '\t' in line]
 
 
-#FIXME: sketchy error handling
 def connect(host, port=5555):
-    """Connect to a TCP/IP device."""
+    """Connect to a TCP/IP device.
+    
+    Returns nothing but will raise ConnectionError with appropriate errno and
+    the error message ADB prints to stdout.
+    """
+    
+    args = ['connect', ':'.join([host, str(port)])]
 
-    for line in check_output('connect', ':'.join([host, str(port)])):
+    for line in check_output(*args):
         if line.startswith('unable to connect to '):
-            #return errno.EHOSTUNREACH
-            raise ConnectionError()
+            raise ConnectionError(errno.EHOSTUNREACH, None, line)
         if line.startswith('already connected to '):
-            #return errno.EISCONN
-            raise ConnectionError()
-
-    return 0
+            raise ConnectionError(errno.EISCONN, None, line)
 
 
-#FIXME: sketchy error handling
 def disconnect(host=None, port=5555):
     """Disconnect from a TCP/IP device.
 
     If *host* is None the adb server will disconnect from all connected TCP/IP
     devices.
+    
+    Returns nothing but will raise ConnectionError with appropriate errno and
+    the error message ADB prints to stdout.
     """
 
     args = ['disconnect']
@@ -182,9 +225,7 @@ def disconnect(host=None, port=5555):
 
     for line in check_output(*args):
         if line.startswith('No such device'):
-            return errno.ENXIO
-
-    return 0
+            raise ConnectionError(errno.ENXIO, args, line)
 
 
 # Device Commands
@@ -245,10 +286,18 @@ def sync(directory=None, list_only=False):
     return output
 
 
-#FIXME: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
-def shell(argstr):
-    """run remote shell command."""
-    with ADBCommand(args, interactive=True) as proc:
+#FIXME
+def shell(argstr=None):
+    """Run remote shell command, or return a tuple of (stdin, stdout, stderr)
+    of an interactive shell.
+    
+    
+    See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+    """
+    if argstr:
+        with ADBCommand(['shell', argstr]) as proc:
+            pass
+    else:
         pass
 
 
@@ -411,6 +460,10 @@ def ppp(local, remote):
 
 if __name__ == '__main__':
     
-    #print(connect('192.168.0.11'))
+    connect('192.168.0.11')
+    import time
+    time.sleep(10)
     print(devices())
+    disconnect('192.168.0.11')
+    
     #ADBCommand('devices')

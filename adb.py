@@ -40,11 +40,6 @@ import subprocess
 ADB_PATH = shutil.which('adb')
 """Location of the adb binary."""
 
-# Device States
-
-ADB_CONN_OFFLINE = 'offline'
-DEV_DEVICE = 'device'
-
 # Environmental Variables
 # FIXME: Negotiate with os.environ (http://stackoverflow.com/questions/2231227/python-subprocess-popen-with-a-modified-environment)
 # FIXME: shell=False so find away to avoid os.environ
@@ -62,13 +57,12 @@ ANDROID_LOG_TAGS = None
 # A path to a product out directory like 'out/target/product/sooner'. If -p
 # is not specified, the ANDROID_PRODUCT_OUT environment variable is used,
 # which must be an absolute path.
-ANDROID_PRODUCT_OUT = '/home/andrew/Downloads/Android'
+ANDROID_PRODUCT_OUT = None
 
 
 ###############################################################################
 # Exceptions
 # FIXME: all of it
-
 
 class ADBError(Exception):
     """Base class for ADB errors."""
@@ -103,24 +97,23 @@ class SyncError(ADBWarning):
 # Base function
 ###############################################################################
 
-
 class ADBCommand(subprocess.Popen):
     """."""
 
-    def __init__(self, *opts, stdout=None, stdin=None, product=None):
+    def __init__(self, *args, stdout=None, stdin=None, stderr=None, product=None):
         """Warning: adb may print server start/stop messages to stdout."""
 
         try:
             #FIXME wtf, this is ugly
             cmd_line = [ADB_PATH]
-            [cmd_line.append(opt) for opt in opts]
+            [cmd_line.append(arg) for arg in args]
 
             subprocess.Popen.__init__(self,
                                       cmd_line,
                                       stdin=stdin,
                                       stdout=stdout,
                                       # adb seems to arbitrarily print to stderr
-                                      stderr=subprocess.STDOUT,
+                                      stderr=stderr,
                                       universal_newlines=True)
         except OSError as exc:
             raise ADBError(exc.errno, ' '.join(cmd_line), exc.strerror)
@@ -174,7 +167,7 @@ def check_output(*args, timeout=None, **kwargs):
             raise
             
         if proc.poll():
-            raise subprocess.CalledProcessError(retcode, proc.args, output=output)
+            raise ADBError(proc.returncode, proc.args, output=output)
             
     return [line for line in output if not line.startswith('*')]
 
@@ -183,7 +176,7 @@ def check_output(*args, timeout=None, **kwargs):
 # General Commands
 ###############################################################################
 
-
+#FIXME: '-l' opt
 def devices():
     """Return a list of device [identifier, state] pairs."""
 
@@ -231,10 +224,9 @@ def disconnect(host=None, port=5555):
 # Device Commands
 ###############################################################################
 
-
 def push(local, remote):
     """Copy file or directory *local* to device as *remote*."""
-    check_output('push', local, remote)
+    return check_output('push', local, remote)
 
 
 def pull(remote, local=None):
@@ -286,19 +278,21 @@ def sync(directory=None, list_only=False):
     return output
 
 
-#FIXME
-def shell(argstr=None):
-    """Run remote shell command, or return a tuple of (stdin, stdout, stderr)
-    of an interactive shell.
+#FIXME: http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
+def shell(args):
+    """Run remote shell command.
     
+    *args* should be a string to be passed to the remote shell.  
     
     See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
     """
-    if argstr:
-        with ADBCommand(['shell', argstr]) as proc:
-            pass
+    if args:
+        return check_output('shell', args)
     else:
-        pass
+        raise NotImplementedError
+        return ADBCommand('shell', stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
 
 
 #FIXME

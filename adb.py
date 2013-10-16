@@ -66,31 +66,25 @@ ANDROID_PRODUCT_OUT = None
 
 class ADBError(Exception):
     """Base class for ADB errors."""
+    
+    pass
+    
+    
+class CommandProcessError(ADBError):
+    """."""
 
     def __init__(self, errno, cmd, output=None):
         self.returncode = errno
         self.cmd = cmd
-        self.output = output or None
+        self.output = output
 
     def __str__(self):
         """."""
-        return self.output
+        return str(self.output)
 
 
-class ADBWarning(Warning):
-    """Base class for ADB errors which the adb tool does not treat as fatal."""
-
-    def __init__(self, errno, errmsg):
-        self.errno = errno
-        self.errmsg = errmsg
-
-class ConnectionError(ADBError):
+class ConnectionError(ADBError, ConnectionError):
     """Class for errors connecting and disconnecting from TCP/IP devices."""
-    pass
-
-
-class SyncError(ADBWarning):
-    """Class for errors during sync()."""
     pass
 
 
@@ -103,29 +97,17 @@ class ADBCommand(subprocess.Popen):
     def __init__(self, *args, stdout=None, stdin=None, stderr=None, product=None):
         """Warning: adb may print server start/stop messages to stdout."""
 
-        try:
-            #FIXME wtf, this is ugly
-            cmd_line = [ADB_PATH]
-            [cmd_line.append(arg) for arg in args]
+        #FIXME wtf, this is ugly
+        cmd_line = [ADB_PATH]
+        [cmd_line.append(arg) for arg in args]
 
-            subprocess.Popen.__init__(self,
-                                      cmd_line,
-                                      stdin=stdin,
-                                      stdout=stdout,
-                                      # adb seems to arbitrarily print to stderr
-                                      stderr=stderr,
-                                      universal_newlines=True)
-        except OSError as exc:
-            raise ADBError(exc.errno, ' '.join(cmd_line), exc.strerror)
-
-
-def output(*args):
-    """."""
-
-    with ADBCommand(*args, stdout=subprocess.PIPE) as proc:
-        stdout = proc.communicate()[0].splitlines()
-
-    return [line for line in stdout if not line.startswith('*')]
+        subprocess.Popen.__init__(self,
+                                  cmd_line,
+                                  stdin=stdin,
+                                  stdout=stdout,
+                                  # adb seems to arbitrarily print to stderr
+                                  stderr=stderr,
+                                  universal_newlines=True)
 
 
 # FIXME
@@ -154,7 +136,7 @@ def check_output(*args, timeout=None, **kwargs):
     """
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
-    with ADBCommand(*args, stdout=subprocess.PIPE, **kwargs) as proc:
+    with ADBCommand(*args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs) as proc:
         try:
             output = proc.communicate(timeout=timeout)[0].splitlines()
         except TimeoutExpired:
@@ -167,9 +149,9 @@ def check_output(*args, timeout=None, **kwargs):
             raise
             
         if proc.poll():
-            raise ADBError(proc.returncode, proc.args, output=output)
+            raise CommandProcessError(proc.returncode, proc.args, output=output)
             
-    return [line for line in output if not line.startswith('*')]
+    return output
 
 
 

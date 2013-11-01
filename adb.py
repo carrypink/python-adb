@@ -37,6 +37,7 @@ import subprocess
 ###############################################################################
 # Constants
 
+#FIXME: req py3.3
 ADB_PATH = shutil.which('adb')
 """Location of the adb binary."""
 
@@ -70,7 +71,7 @@ class ADBError(Exception):
     pass
     
     
-class CommandProcessError(ADBError):
+class CommandProcessError(ADBError, subprocess.CalledProcessError):
     """."""
 
     def __init__(self, errno, cmd, output=None):
@@ -94,20 +95,20 @@ class ConnectionError(ADBError, ConnectionError):
 class ADBCommand(subprocess.Popen):
     """."""
 
-    def __init__(self, *args, stdout=None, stdin=None, stderr=None, product=None):
+    def __init__(self, *args, bufsize=-1, stdin=None, stdout=None, stderr=None, product=None):
         """Warning: adb may print server start/stop messages to stdout."""
 
         #FIXME wtf, this is ugly
         cmd_line = [ADB_PATH]
         [cmd_line.append(arg) for arg in args]
 
-        subprocess.Popen.__init__(self,
-                                  cmd_line,
-                                  stdin=stdin,
-                                  stdout=stdout,
-                                  # adb seems to arbitrarily print to stderr
-                                  stderr=stderr,
-                                  universal_newlines=True)
+        subprocess.Popen.__init__(self, cmd_line,
+                                        bufsize=bufsize,
+                                        shell=False,
+                                        stdin=stdin,
+                                        stdout=stdout,
+                                        stderr=stderr,
+                                        universal_newlines=True)
 
 
 # FIXME
@@ -118,7 +119,7 @@ def check_output(*args, timeout=None, **kwargs):
     CalledProcessError object will have the return code in the returncode
     attribute and output in the output attribute.
 
-    The arguments are the same as for the Popen constructor.  Example:
+    The arguments are the same as for the ADBCommand constructor.  Example:
 
     >>> check_output(["ls", "-l", "/dev/null"])
     b'crw-rw-rw- 1 root root 1, 3 Oct 18  2007 /dev/null\n'
@@ -138,8 +139,8 @@ def check_output(*args, timeout=None, **kwargs):
         raise ValueError('stdout argument not allowed, it will be overridden.')
     with ADBCommand(*args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs) as proc:
         try:
-            output = proc.communicate(timeout=timeout)[0].splitlines()
-        except TimeoutExpired:
+            output, unused_err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
             proc.kill()
             output, unused_err = proc.communicate()
             raise subprocess.TimeoutExpired(proc.args, timeout, output=output)
@@ -164,7 +165,7 @@ def devices():
 
     output = check_output('devices')
 
-    return [line.split('\t') for line in output if '\t' in line]
+    return [line.split('\t') for line in output.splitlines() if '\t' in line]
 
 
 def connect(host, port=5555):
@@ -260,13 +261,14 @@ def sync(directory=None, list_only=False):
     return output
 
 
-#FIXME: http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
-def shell(args):
+#FIXME: 
+def shell(args=None):
     """Run remote shell command.
     
     *args* should be a string to be passed to the remote shell.  
     
     See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+         http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
     """
     if args:
         return check_output('shell', args)
@@ -278,13 +280,24 @@ def shell(args):
 
 
 #FIXME
-def emu(*args):
-    """run emulator console command."""
-    with ADBCommand(args, interactive=True) as proc:
-        pass
+def emu(args=None):
+    """run emulator console command.
+    
+    *args* should be a string to be passed to the emulator shell.  
+    
+    See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+         http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
+    """
+    if args:
+        return check_output('shell', args)
+    else:
+        raise NotImplementedError
+        return ADBCommand('shell', stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
 
 
-#FIXME
+#FIXME: *size*/variable length
 def logcat(filter_spec=None):
     """View device log."""
     with ADBCommand(args, interactive=True) as proc:
@@ -313,7 +326,7 @@ def jdwp():
     pass
 
 
-#FIXME: test and cleanup
+#FIXME: error-checking (eg. len(encryption))
 def install(filename, lock=False, reinstall=False, sdcard=False,
             encryption=None):
     """Push *filename* to the device and install it.
@@ -335,15 +348,11 @@ def install(filename, lock=False, reinstall=False, sdcard=False,
         cmd.append('-s')
 
     if encryption:
-        cmd.append('--algo')
-        cmd.append(encryption[0])
-        cmd.append('--key')
-        cmd.append(encryption[1])
-        cmd.append('--iv')
-        cmd.append(encryption[2])
+        cmd.append(' '.join(['--algo', encryption[0]]))
+        cmd.append(' '.join(['--key', encryption[1]]))
+        cmd.append(' '.join(['--iv', encryption[2]]))
 
-    with ADBCommand(*cmd) as proc:
-        return proc.lines
+    return check_output(cmd)
 
 
 #FIXME: test and cleanup
@@ -358,7 +367,7 @@ def uninstall(filename, keep=False):
     if keep:
         cmd.append('-k')
 
-    return ADBCommand(*cmd)
+    return check_output(*cmd)
 
 
 #FIXME: major output 3Mb+
@@ -366,7 +375,7 @@ def bugreport():
     """Return a string containing all information from the device that should
     be included in a bug report.
     """
-    return ADBCommand('bugreport').lines
+    return check_output('bugreport')
 
 
 #FIXME

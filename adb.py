@@ -61,6 +61,14 @@ ANDROID_LOG_TAGS = None
 ANDROID_PRODUCT_OUT = None
 
 
+################################################################################
+# Constants
+
+SYNC_DATA = 'data'
+SYNC_SYSTEM = 'system'
+SYNC_BOTH = None
+
+
 ###############################################################################
 # Exceptions
 # FIXME: all of it
@@ -95,11 +103,21 @@ class ConnectionError(ADBError, ConnectionError):
 class ADBCommand(subprocess.Popen):
     """."""
 
-    def __init__(self, *args, bufsize=-1, stdin=None, stdout=None, stderr=None, product=None):
+    def __init__(self, *args, bufsize=-1, stdin=None, stdout=None, stderr=None,
+                 product=None, serial=None):
         """Warning: adb may print server start/stop messages to stdout."""
+        
+        cmd_line = [ADB_PATH]
+        
+        #FIXME: 
+        if product:
+            cmd_line.append('-p')
+            cmd_line.append(product)
+        if serial:
+            cmd_line.append('-s')
+            cmd_line.append(serial)
 
         #FIXME wtf, this is ugly
-        cmd_line = [ADB_PATH]
         [cmd_line.append(arg) for arg in args]
 
         subprocess.Popen.__init__(self, cmd_line,
@@ -109,9 +127,11 @@ class ADBCommand(subprocess.Popen):
                                         stdout=stdout,
                                         stderr=stderr,
                                         universal_newlines=True)
+                                        
+        print(cmd_line)
 
 
-# FIXME
+# FIXME: doc, adb proc args (-s, -p)
 def check_output(*args, timeout=None, **kwargs):
     r"""Run command with arguments and return its output.
 
@@ -152,20 +172,34 @@ def check_output(*args, timeout=None, **kwargs):
         if proc.poll():
             raise CommandProcessError(proc.returncode, proc.args, output=output)
             
-    return output
+    return output.splitlines()
 
 
 
 # General Commands
 ###############################################################################
 
-#FIXME: '-l' opt
+#FIXME: doc'-l' opt
 def devices():
     """Return a list of device [identifier, state] pairs."""
 
-    output = check_output('devices')
+    for line in check_output('devices', '-l'):
+        output = []
+        
+        if line and 'List of devices attached' not in line:
+            device = {}
+            
+            dev_line = line.split()
+            
+            device['serial'] = dev_line[0]
+            device['state'] = dev_line[1]
+            
+            if len(dev_line) > 2:
+                [device.update([kv.split(':')]) for kv in dev_line[2:]]
+                    
+            output.append(device)
 
-    return [line.split('\t') for line in output.splitlines() if '\t' in line]
+    return output
 
 
 def connect(host, port=5555):
@@ -179,9 +213,9 @@ def connect(host, port=5555):
 
     for line in check_output(*args):
         if line.startswith('unable to connect to '):
-            raise ConnectionError(errno.EHOSTUNREACH, None, line)
+            raise ConnectionError(errno.EHOSTUNREACH, args, line)
         if line.startswith('already connected to '):
-            raise ConnectionError(errno.EISCONN, None, line)
+            raise ConnectionError(errno.EISCONN, args, line)
 
 
 def disconnect(host=None, port=5555):
@@ -221,42 +255,31 @@ def pull(remote, local=None):
 
 
 #FIXME: ANDROID_PRODUCT_OUT
-def sync(directory=None, list_only=False):
+def sync(product, directory=SYNC_BOTH, list_only=False):
     """Sync from host to client.
 
-    The *directory* parameter should be either 'system', 'data' or None if both
+    The *directory* parameter should be either abd.SYNC_SYSTEM or None if both
     should be synced.  If *list_only* is True then a simulated sync() will be
     run.
     """
     args = ['sync']
-    output = {}
 
     if list_only:
         args.append('-l')
 
-    if directory:
+    if directory in ('data', 'system'):
         args.append(directory)
+    # adb's version of a ValueError is to return the help print out (annoying)
+    elif directory:
+        raise ValueError('invalid sync directory')
 
-    proc = ADBCommand(*args, stdout=subprocess.PIPE)
-    stdout = proc.communicate()[0].splitlines()
+    for line in check_output(*args, product=product):
+        if 'files pushed' in line:
+            break
+        elif 'push:' in line:
+            transfer = line.lstrip('would ').lstrip('push: ').split(' -> ')[0]
 
-    if proc.wait():
-        error = True
-
-    for line in stdout:
-        if line.startswith('syncing'):
-            output[line[9:-3]] = []
-
-            for transaction in stdout[stdout.index(line) + 1:]:
-                if 'files pushed' in transaction:
-                    break
-                elif 'push:' in transaction:
-                    transaction = transaction.lstrip('would ')
-                    transaction = transaction.lstrip('push: ')
-
-                    output[line[9:-3]].append(transaction)
-                else:
-                    raise ADBError(proc.returncode, ' '.join(args), os.strerror(proc.returncode))
+            output.append(transfer)
 
     return output
 
@@ -304,7 +327,7 @@ def logcat(filter_spec=None):
         pass
 
 
-#FIXME
+#FIXME: test, doc
 def forward(local, remote):
     """Forward socket connections.
 
@@ -317,13 +340,21 @@ def forward(local, remote):
     dev:<character device name>
     jdwp:<process pid> (remote only).
     """
-    pass
+    for spec in (local, remote):
+        if spec.split(':') not in ('tcp', 'localabstract', 'localreserved',
+                                   'localfilesystem', 'dev', 'jdwp'):
+            raise ValueError('invalid socket type')
+    
+    return check_output('forward', local, remote)
 
 
-#FIXME
 def jdwp():
-    """list PIDs of processes hosting a JDWP transport."""
-    pass
+    """List PIDs of processes hosting a JDWP transport.
+    
+    Returns a list of integers.
+    """
+    
+    return [int(pid) for pid in check_output('jdwp')]
 
 
 #FIXME: error-checking (eg. len(encryption))
@@ -401,7 +432,7 @@ def restore(file):
 
 def version():
     """Return version number as a string."""
-    return ADBCommand('version').lines[0][29:]
+    return check_output('version')[0][29:]
 
 
 # Scripting
@@ -421,10 +452,11 @@ def get_state():
     pass
 
 
-#FIXME
+#FIXME: doc
 def wait_for_device():
     """."""
-    pass
+    
+    check_output('wait-for-device')
 
 
 # Networking

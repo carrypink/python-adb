@@ -258,7 +258,7 @@ def pull(remote, local=None):
 def sync(product, directory=SYNC_BOTH, list_only=False):
     """Sync from host to client.
 
-    The *directory* parameter should be either abd.SYNC_SYSTEM or None if both
+    *directory* should be either SYNC_DATA, adb.SYNC_SYSTEM or SYNC_BOTH if both
     should be synced.  If *list_only* is True then a simulated sync() will be
     run.
     """

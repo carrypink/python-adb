@@ -238,198 +238,6 @@ def disconnect(host=None, port=5555):
             raise ConnectionError(errno.ENXIO, args, line)
 
 
-# Device Commands
-###############################################################################
-
-def push(local, remote):
-    """Copy file or directory *local* to device as *remote*."""
-    return check_output('push', local, remote)
-
-
-def pull(remote, local=None):
-    """Copy file or directory *remote* from device to *local*, if specified."""
-    if local:
-        check_output('pull', remote, local)
-    else:
-        check_output('pull', remote)
-
-
-#FIXME: ANDROID_PRODUCT_OUT
-def sync(product, directory=SYNC_BOTH, list_only=False):
-    """Sync from host to client.
-
-    *directory* should be either SYNC_DATA, adb.SYNC_SYSTEM or SYNC_BOTH if both
-    should be synced.  If *list_only* is True then a simulated sync() will be
-    run.
-    """
-    args = ['sync']
-
-    if list_only:
-        args.append('-l')
-
-    if directory in ('data', 'system'):
-        args.append(directory)
-    # adb's version of a ValueError is to return the help print out (annoying)
-    elif directory:
-        raise ValueError('invalid sync directory')
-
-    for line in check_output(*args, product=product):
-        if 'files pushed' in line:
-            break
-        elif 'push:' in line:
-            transfer = line.lstrip('would ').lstrip('push: ').split(' -> ')[0]
-
-            output.append(transfer)
-
-    return output
-
-
-#FIXME: 
-def shell(args=None):
-    """Run remote shell command.
-    
-    *args* should be a string to be passed to the remote shell.  
-    
-    See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
-         http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
-    """
-    if args:
-        return check_output('shell', args)
-    else:
-        raise NotImplementedError
-        return ADBCommand('shell', stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-
-
-#FIXME
-def emu(args=None):
-    """run emulator console command.
-    
-    *args* should be a string to be passed to the emulator shell.  
-    
-    See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
-         http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
-    """
-    if args:
-        return check_output('shell', args)
-    else:
-        raise NotImplementedError
-        return ADBCommand('shell', stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-
-
-#FIXME: *size*/variable length
-def logcat(filter_spec=None):
-    """View device log."""
-    with ADBCommand(args, interactive=True) as proc:
-        pass
-
-
-#FIXME: test, doc
-def forward(local, remote):
-    """Forward socket connections.
-
-    forward specs are one of:
-
-    tcp:<port>
-    localabstract:<unix domain socket name>
-    localreserved:<unix domain socket name>
-    localfilesystem:<unix domain socket name>
-    dev:<character device name>
-    jdwp:<process pid> (remote only).
-    """
-    for spec in (local, remote):
-        if spec.split(':') not in ('tcp', 'localabstract', 'localreserved',
-                                   'localfilesystem', 'dev', 'jdwp'):
-            raise ValueError('invalid socket type')
-    
-    return check_output('forward', local, remote)
-
-
-def jdwp():
-    """List PIDs of processes hosting a JDWP transport.
-    
-    Returns a list of integers.
-    """
-    
-    return [int(pid) for pid in check_output('jdwp')]
-
-
-#FIXME: error-checking (eg. len(encryption))
-def install(filename, lock=False, reinstall=False, sdcard=False,
-            encryption=None):
-    """Push *filename* to the device and install it.
-
-    If *lock* is True the app will be forward locked.
-    If *reinstall* is True the app will be reinstalled if already installed.
-    If *sdcard* is True the app will be installed to the SD card using the
-    native App2SD method.
-    If *encryption* is not None it should be a sequence object of three strings
-    in the form [ algorithm-name, hex-encoded-key, hex-encoded-iv ].
-    """
-    cmd = ['install', filename]
-
-    if lock:
-        cmd.append('-l')
-    if reinstall:
-        cmd.append('-r')
-    if sdcard:
-        cmd.append('-s')
-
-    if encryption:
-        cmd.append(' '.join(['--algo', encryption[0]]))
-        cmd.append(' '.join(['--key', encryption[1]]))
-        cmd.append(' '.join(['--iv', encryption[2]]))
-
-    return check_output(cmd)
-
-
-#FIXME: test and cleanup
-def uninstall(filename, keep=False):
-    """Uninstall *filename* from the device.
-
-    If *keep* is True the application's data and cache will not be cleared.
-    """
-
-    cmd = ['uninstall', filename]
-
-    if keep:
-        cmd.append('-k')
-
-    return check_output(*cmd)
-
-
-#FIXME: major output 3Mb+
-def bugreport():
-    """Return a string containing all information from the device that should
-    be included in a bug report.
-    """
-    return check_output('bugreport')
-
-
-#FIXME
-def backup(file='backup.ab', apk=False, shared=False, all=False, system=True,
-           *packages):
-    """Create an archive of the device's data called *file*.
-
-    If *apk* is True the APK files themselves will be included.
-    If *shared* is True the contents of the device's shared/external storage
-    will be included.
-    If *all* is True all installed applications will be included.
-    If *all* is True but *system* is False then system applications will be
-    excluded, unless they are explicity listed in *packages*.
-    """
-    pass
-
-
-#FIXME
-def restore(file):
-    """restore device contents from the <file> backup archive."""
-    pass
-
-
 def version():
     """Return version number as a string."""
     return check_output('version')[0][29:]
@@ -438,7 +246,6 @@ def version():
 # Scripting
 # FIXME: missing commands
 ###############################################################################
-
 
 #FIXME
 def get_serialno():
@@ -469,3 +276,201 @@ def ppp(local, remote):
     """.
     """
     pass
+    
+
+# Device Class
+###############################################################################
+
+class Device:
+    """."""
+    
+    def __init_(self, identifier=None, product=None, host='localhost', port=5037):
+        """."""
+        pass
+
+    def push(self, local, remote):
+        """Copy file or directory *local* to device as *remote*."""
+        return check_output('push', local, remote)
+
+
+    def pull(self, remote, local=None):
+        """Copy file or directory *remote* from device to *local*, if specified."""
+        if local:
+            check_output('pull', remote, local)
+        else:
+            check_output('pull', remote)
+
+
+    #FIXME: ANDROID_PRODUCT_OUT
+    def sync(self, product, directory=SYNC_BOTH, list_only=False):
+        """Sync from host to client.
+
+        *directory* should be either SYNC_DATA, adb.SYNC_SYSTEM or SYNC_BOTH if both
+        should be synced.  If *list_only* is True then a simulated sync() will be
+        run.
+        """
+        args = ['sync']
+
+        if list_only:
+            args.append('-l')
+
+        if directory in ('data', 'system'):
+            args.append(directory)
+        # adb's version of a ValueError is to return the help print out (annoying)
+        elif directory:
+            raise ValueError('invalid sync directory')
+
+        for line in check_output(*args, product=product):
+            if 'files pushed' in line:
+                break
+            elif 'push:' in line:
+                transfer = line.lstrip('would ').lstrip('push: ').split(' -> ')[0]
+
+                output.append(transfer)
+
+        return output
+
+
+    #FIXME: 
+    def shell(self, args=None):
+        """Run remote shell command.
+        
+        *args* should be a string to be passed to the remote shell.  
+        
+        See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+             http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
+        """
+        if args:
+            return check_output('shell', args)
+        else:
+            raise NotImplementedError
+            return ADBCommand('shell', stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+
+    #FIXME
+    def emu(args=None):
+        """run emulator console command.
+        
+        *args* should be a string to be passed to the emulator shell.  
+        
+        See: http://stackoverflow.com/questions/18407470/using-adb-sendevent-in-python
+             http://stackoverflow.com/questions/375427/non-blocking-read-on-a-subprocess-pipe-in-python
+        """
+        if args:
+            return check_output('shell', args)
+        else:
+            raise NotImplementedError
+            return ADBCommand('shell', stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+
+
+    #FIXME: *size*/variable length
+    def logcat(filter_spec=None):
+        """View device log."""
+        with ADBCommand(args, interactive=True) as proc:
+            pass
+
+
+    #FIXME: test, doc
+    def forward(local, remote):
+        """Forward socket connections.
+
+        forward specs are one of:
+
+        tcp:<port>
+        localabstract:<unix domain socket name>
+        localreserved:<unix domain socket name>
+        localfilesystem:<unix domain socket name>
+        dev:<character device name>
+        jdwp:<process pid> (remote only).
+        """
+        for spec in (local, remote):
+            if spec.split(':') not in ('tcp', 'localabstract', 'localreserved',
+                                       'localfilesystem', 'dev', 'jdwp'):
+                raise ValueError('invalid socket type')
+        
+        return check_output('forward', local, remote)
+
+
+    def jdwp():
+        """List PIDs of processes hosting a JDWP transport.
+        
+        Returns a list of integers.
+        """
+        
+        return [int(pid) for pid in check_output('jdwp')]
+
+
+    #FIXME: error-checking (eg. len(encryption))
+    def install(filename, lock=False, reinstall=False, sdcard=False,
+                encryption=None):
+        """Push *filename* to the device and install it.
+
+        If *lock* is True the app will be forward locked.
+        If *reinstall* is True the app will be reinstalled if already installed.
+        If *sdcard* is True the app will be installed to the SD card using the
+        native App2SD method.
+        If *encryption* is not None it should be a sequence object of three strings
+        in the form [ algorithm-name, hex-encoded-key, hex-encoded-iv ].
+        """
+        cmd = ['install', filename]
+
+        if lock:
+            cmd.append('-l')
+        if reinstall:
+            cmd.append('-r')
+        if sdcard:
+            cmd.append('-s')
+
+        if encryption:
+            cmd.append(' '.join(['--algo', encryption[0]]))
+            cmd.append(' '.join(['--key', encryption[1]]))
+            cmd.append(' '.join(['--iv', encryption[2]]))
+
+        return check_output(cmd)
+
+
+    #FIXME: test and cleanup
+    def uninstall(filename, keep=False):
+        """Uninstall *filename* from the device.
+
+        If *keep* is True the application's data and cache will not be cleared.
+        """
+
+        cmd = ['uninstall', filename]
+
+        if keep:
+            cmd.append('-k')
+
+        return check_output(*cmd)
+
+
+    #FIXME: major output 3Mb+
+    def bugreport():
+        """Return a string containing all information from the device that should
+        be included in a bug report.
+        """
+        return check_output('bugreport')
+
+
+    #FIXME
+    def backup(file='backup.ab', apk=False, shared=False, all=False, system=True,
+               *packages):
+        """Create an archive of the device's data called *file*.
+
+        If *apk* is True the APK files themselves will be included.
+        If *shared* is True the contents of the device's shared/external storage
+        will be included.
+        If *all* is True all installed applications will be included.
+        If *all* is True but *system* is False then system applications will be
+        excluded, unless they are explicity listed in *packages*.
+        """
+        pass
+
+
+    #FIXME
+    def restore(file):
+        """restore device contents from the <file> backup archive."""
+        pass

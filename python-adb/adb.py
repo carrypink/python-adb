@@ -22,9 +22,14 @@ r"""adb - A pure python adb module
 
 import errno
 import os
+import shutil
 import socket
 import subprocess
 
+
+#FIXME: req py3.3
+ADB_PATH = shutil.which('adb')
+"""Location of the adb binary."""
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
@@ -112,8 +117,6 @@ class ADBCommand(subprocess.Popen):
                                         stderr=stderr,
                                         universal_newlines=True)
                                         
-        print(cmd_line)
-
 
 # FIXME: doc, adb proc args (-s, -p)
 def check_output(*args, timeout=None, **kwargs):
@@ -142,25 +145,34 @@ def check_output(*args, timeout=None, **kwargs):
 class Client:
     """."""
     
-    def __init__(self):
+    _server = None
+    _socket = None
+    
+    def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         """."""
         
-        self.socket = self._connect()
+        self._server = (host, port)
+        self._connect()
 
-    def communicate(self, query):
-        message = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-        
+    def _communicate(self, query):
+    
         # Send the command
-        self.socket.send(message)
+        message = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
+        self._socket.send(message)
         
-        return_status = self.socket.recv(4)
-        return_size = int(self.socket.recv(4), 16)
-        return_text = str(self.socket.recv(return_size))
+        return_status = self._socket.recv(4)
         
         if return_status == b'FAIL':
-            raise ADBError(return_text)
+            err_size = int(self._socket.recv(4), 16)
+            err_str = self._socket.recv(err_size)
+            raise ADBError(err_str)
         elif return_status == b'OKAY':
-            return return_text
+            if query == 'host:version':
+                return int(self._socket.recv(4), 16)
+            else:
+                ret_size = int(self._socket.recv(4), 16)
+                ret_str = str(self._socket.recv(return_size))
+                return ret_str
     
     #FIXME    
     def _connect(self, retry=3):
@@ -168,16 +180,19 @@ class Client:
         
         while retry:
             try:
-                server_socket = socket.create_connection((SERVER_HOST, SERVER_PORT))
+                self._socket = socket.create_connection(self._server)
+                break
             except ConnectionRefusedError:
-                raise exc
                 check_output('start-server')
                 retry -= 1
-            else:
-                return server_socket
         else:
             raise ADBError("Could not connect to server.")
             
+    def _disconnect(self):
+        """."""
+        if self._socket:
+            self._socket.close()
+         
             
 class Device(Client):
     """."""
@@ -187,9 +202,15 @@ class Device(Client):
         pass
         
         
+class Server:
+    """."""
+    
+    pass
+        
+        
 if __name__ == '__main__':
     
     adbc = Client()
-    print(adbc.communicate('host:version'))
-    print(adbc.communicate('host:devices'))
+    print(adbc._communicate('host:version'))
+    print(adbc._communicate('host:devices'))
     

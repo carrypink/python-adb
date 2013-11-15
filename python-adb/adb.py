@@ -61,19 +61,6 @@ class ADBError(Exception):
     """Base class for ADB errors."""
     
     pass
-    
-    
-class CommandProcessError(ADBError, subprocess.CalledProcessError):
-    """."""
-
-    def __init__(self, errno, cmd, output=None):
-        self.returncode = errno
-        self.cmd = cmd
-        self.output = output
-
-    def __str__(self):
-        """."""
-        return str(self.output)
 
 
 class ConnectionError(ADBError, ConnectionError):
@@ -105,11 +92,6 @@ class ClientBase:
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.disconnect()
-        
-    def _kill_server(self):
-        """Kill the server via adb command line client."""
-        
-        return subprocess.check_output([ADB_PATH, 'kill-server'])
         
     def _start_server(self):
         """Kill the server via adb command line client."""
@@ -145,7 +127,7 @@ class ClientBase:
         #FIXME
         print(ret_status)
         
-        if ret_status == b'FAIL':
+        if ret_status == A_FAIL:
             err_size = int(self.socket.recv(4), 16)
             err_bytes = self.socket.recv(err_size)
             raise ADBError(err_bytes)

@@ -86,61 +86,8 @@ class ADBClientError(ADBError):
     pass
 
 
-# Base function
-###############################################################################
-
-class ADBCommand(subprocess.Popen):
-    """."""
-
-    def __init__(self, *args, bufsize=-1, stdin=None, stdout=None, stderr=None,
-                 product=None, serial=None):
-        """Warning: adb may print server start/stop messages to stdout."""
-        
-        cmd_line = [ADB_PATH]
-        
-        #FIXME: 
-        if product:
-            cmd_line.append('-p')
-            cmd_line.append(product)
-        if serial:
-            cmd_line.append('-s')
-            cmd_line.append(serial)
-
-        #FIXME wtf, this is ugly
-        [cmd_line.append(arg) for arg in args]
-
-        subprocess.Popen.__init__(self, cmd_line,
-                                        bufsize=bufsize,
-                                        shell=False,
-                                        stdin=stdin,
-                                        stdout=stdout,
-                                        stderr=stderr,
-                                        universal_newlines=True)
-                                        
-
-# FIXME: doc, adb proc args (-s, -p)
-def check_output(*args, timeout=None, **kwargs):
-    r"""Run command with arguments and return its output."""
-    
-    if 'stdout' in kwargs:
-        raise ValueError('stdout argument not allowed, it will be overridden.')
-    with ADBCommand(*args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs) as proc:
-        try:
-            output, unused_err = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            output, unused_err = proc.communicate()
-            raise subprocess.TimeoutExpired(proc.args, timeout, output=output)
-        except:
-            proc.kill()
-            proc.wait()
-            raise
-            
-        if proc.poll():
-            raise CommandProcessError(proc.returncode, proc.args, output=output)
-            
-    return output.splitlines()
-    
+# Client Classes
+###############################################################################    
     
 class ClientBase:
     """Base class for clients of the ADB Server."""
@@ -158,6 +105,16 @@ class ClientBase:
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.disconnect()
+        
+    def _kill_server(self):
+        """Kill the server via adb command line client."""
+        
+        return subprocess.check_output([ADB_PATH, 'kill-server'])
+        
+    def _start_server(self):
+        """Kill the server via adb command line client."""
+        
+        return subprocess.check_output([ADB_PATH, 'start-server'])
     
     #FIXME: test, doc
     def connect(self, address=('localhost', 5037), retry=3):
@@ -168,7 +125,7 @@ class ClientBase:
                 self.socket = socket.create_connection(address)
                 break
             except ConnectionRefusedError:
-                check_output('start-server')
+                self._start_server()
                 retry -= 1
         else:
             raise ADBError("Could not connect to server.")
@@ -185,6 +142,9 @@ class ClientBase:
         """."""
         ret_status = self.socket.recv(4)
         
+        #FIXME
+        print(ret_status)
+        
         if ret_status == b'FAIL':
             err_size = int(self.socket.recv(4), 16)
             err_bytes = self.socket.recv(err_size)
@@ -199,6 +159,10 @@ class ClientBase:
     def send(self, query):
         """."""
         query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
+        
+        #FIXME
+        print(query)
+        
         return self.socket.send(query)
             
 
@@ -367,5 +331,5 @@ if __name__ == '__main__':
     
     with ServerClient() as adbc:
         print('version: ' + str(adbc.version()))
-        print('version: ' + str(adbc.devices()))
+        print('devices: ' + str(adbc.devices()))
     

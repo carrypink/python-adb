@@ -94,7 +94,11 @@ class ClientBase:
         self.disconnect()
         
     def _start_server(self):
-        """Kill the server via adb command line client."""
+        """Start the server via adb command line client."""
+        adb_bin = shutil.which('adb')
+        
+        if adb_bin:
+            raise ADBError('can not find "adb" binary in PATH')
         
         return subprocess.check_output([ADB_PATH, 'start-server'])
     
@@ -118,10 +122,32 @@ class ClientBase:
         if self.socket:
             self.socket.close()
             self.socket = None
+
+    def query(self, bytes):
+        """Send a query to the server.
+
+        .
+        """
+
+        query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
             
     #FIXME: test, doc
     def recv(self):
-        """."""
+        """Receive a message from the server.
+
+        Messages from the server are in the form of a 4-byte return status,
+        followed by a 4-byte hex length and finally the payload if hex length is
+        greater than 0.
+
+        If the return status is A_FAIL ADBError will be raised accompanied by the
+        error message.
+
+        If the return status is A_OKAY recv() will return a bytestring unless the
+        expected length is not None but the return size is 0, in which case it is
+        assumed a 'host:version' query was sent and a version string will be
+        returned.
+
+        """
         ret_status = self.socket.recv(4)
         
         #FIXME
@@ -130,13 +156,15 @@ class ClientBase:
         if ret_status == A_FAIL:
             err_size = int(self.socket.recv(4), 16)
             err_bytes = self.socket.recv(err_size)
+            
             raise ADBError(err_bytes)
         elif ret_status == A_OKAY:
             ret_size = int(self.socket.recv(4), 16)
                 
             if ret_size:
                 ret_bytes = str(self.socket.recv(ret_size))
-                return ret_bytes
+                
+            return ret_bytes or str(ret_size) #FIXME
             
     def send(self, query):
         """."""
@@ -175,7 +203,10 @@ class ServerClient(ClientBase):
         This is used when the ADB client detects that an obsolete server is
         running after an upgrade.
         """
-        pass
+        
+        self.send('host:kill')
+
+        return self.recv()
         
     def track_devices(self):
         """This is a variant of devices() which doesn't close the

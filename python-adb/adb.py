@@ -16,7 +16,7 @@
 
 # Copyright 2012,2013 Andrew Holmes <andrew.g.r.holmes@gmail.com>
 
-r"""adb - A pure python adb module
+r"""adb - A (almost) pure python adb client
 
 """
 
@@ -27,13 +27,11 @@ import socket
 import subprocess
 
 
-#FIXME: req py3.3
-ADB_PATH = shutil.which('adb')
-"""Location of the adb binary."""
+# Constants
+###############################################################################
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
-
 
 A_SYNC = 0x434e5953
 A_CNXN = 0x4e584e43
@@ -55,11 +53,11 @@ ID_FAIL = 0x4c494146
 ID_QUIT = 0x54495551
 
 
-
+# Constants
+###############################################################################
 
 class ADBError(Exception):
-    """Base class for ADB errors."""
-    
+    """Base class for ADB errors."""    
     pass
 
 
@@ -79,7 +77,6 @@ class ADBClientError(ADBError):
 class ClientBase:
     """Base class for clients of the ADB Server."""
     
-    server = None
     socket = None
     
     def __init__(self):
@@ -97,13 +94,13 @@ class ClientBase:
         """Start the server via adb command line client."""
         adb_bin = shutil.which('adb')
         
-        if adb_bin:
+        if not adb_bin:
             raise ADBError('can not find "adb" binary in PATH')
         
-        return subprocess.check_output([ADB_PATH, 'start-server'])
+        return subprocess.check_output([adb_bin, 'start-server'])
     
     #FIXME: test, doc
-    def connect(self, address=('localhost', 5037), retry=3):
+    def connect(self, address=(SERVER_HOST, SERVER_PORT), retry=3):
         """."""
         
         while retry:
@@ -114,6 +111,7 @@ class ClientBase:
                 self._start_server()
                 retry -= 1
         else:
+            #FIXME: use ConnectionError
             raise ADBError("Could not connect to server.")
 
     #FIXME: test, doc
@@ -123,10 +121,20 @@ class ClientBase:
             self.socket.close()
             self.socket = None
 
-    def query(self, bytes):
+    def query(self, query):
         """Send a query to the server.
 
-        .
+        Responses from the server are in the form of a 4-byte return status,
+        followed by a 4-byte hex length and finally the payload if hex length is
+        greater than 0.
+
+        If the return status is A_FAIL ADBError will be raised accompanied by the
+        error message.
+
+        If the return status is A_OKAY recv() will return a bytestring unless the
+        expected length is not None but the return size is 0, in which case it is
+        assumed a 'host:version' query was sent and a version string will be
+        returned.
         """
 
         query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')

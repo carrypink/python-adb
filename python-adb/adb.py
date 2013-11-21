@@ -124,67 +124,42 @@ class ClientBase:
             self.socket.close()
             self.socket = None
 
-    def query(self, query):
-        """Send a query to the server.
+    def request(self, query):
+        """Send a request to the server.
 
         Responses from the server are in the form of a 4-byte return status,
         followed by a 4-byte hex length and finally the payload if hex length is
         greater than 0.
 
-        If the return status is MSG_FAIL ADBError will be raised accompanied by the
+        If the return status is b'FAIL' ADBError will be raised accompanied by the
         error message.
 
-        If the return status is MSG_OKAY recv() will return a bytestring unless the
+        If the return status is b'OKAY' recv() will return a bytestring unless the
         expected length is not None but the return size is 0, in which case it is
         assumed a 'host:version' query was sent and a version string will be
         returned.
         """
+        
+        if not self.socket:
+            self.connect()
 
-        query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-            
-    #FIXME: test, doc
-    def recv(self):
-        """Receive a message from the server.
-
-        Messages from the server are in the form of a 4-byte return status,
-        followed by a 4-byte hex length and finally the payload if hex length is
-        greater than 0.
-
-        If the return status is MSG_FAIL ADBError will be raised accompanied by the
-        error message.
-
-        If the return status is MSG_OKAY recv() will return a bytestring unless the
-        expected length is not None but the return size is 0, in which case it is
-        assumed a 'host:version' query was sent and a version string will be
-        returned.
-
-        """
-        ret_status = self.socket.recv(4)
+        request = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
+        self.socket.send(request)
+        
+        #
+        status = self.socket.recv(4)
         
         #FIXME
-        print(ret_status)
+        print(b'return status: ' + status)
         
-        if ret_status == MSG_FAIL:
-            err_size = int(self.socket.recv(4), 16)
-            err_bytes = self.socket.recv(err_size)
-            
-            raise ADBError(err_bytes)
-        elif ret_status == MSG_OKAY:
+        #
+        if status == b'OKAY':
             ret_size = int(self.socket.recv(4), 16)
-                
-            if ret_size:
-                return str(self.socket.recv(ret_size))
-            else:
-                return str(int(ret_size, 16))
-            
-    def send(self, query):
-        """."""
-        query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-        
-        #FIXME
-        print(query)
-        
-        return self.socket.send(query)
+            return self.socket.recv(ret_size)
+        #
+        elif status == b'FAIL':
+            err_size = int(self.socket.recv(4), 16)
+            raise ADBError(self.socket.recv(err_size))
             
 
 class ServerClient(ClientBase):
@@ -196,17 +171,15 @@ class ServerClient(ClientBase):
         
     def version(self):
         """Ask the ADB server for its internal version number."""
-        self.send('host:version')
-        return self.recv()
+        return int(self.request('host:version'), 16)
         
     def devices(self):
         """Ask to return the list of available Android devices and their state.
         
         Returns a byte string that will be dumped as-is by the client.
         """
-        self.send('host:devices')
         
-        return self.recv()
+        return self.request('host:devices')
         
     def kill(self):
         """Ask the ADB server to quit immediately.
@@ -215,9 +188,7 @@ class ServerClient(ClientBase):
         running after an upgrade.
         """
         
-        self.send('host:kill')
-
-        return self.recv()
+        return self.request('host:kill')
         
     def track_devices(self):
         """This is a variant of devices() which doesn't close the
@@ -337,7 +308,7 @@ class ServerClient(ClientBase):
         pass
          
             
-class ADBDClient(ClientBase):
+class DeviceClient(ClientBase):
     """."""
     
     def __init__(self):
@@ -356,4 +327,5 @@ if __name__ == '__main__':
     with ServerClient() as adbc:
         print('version: ' + str(adbc.version()))
         print('devices: ' + str(adbc.devices()))
+        print('kill: ' + str(adbc.kill()))
     

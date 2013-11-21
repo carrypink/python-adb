@@ -33,24 +33,22 @@ import subprocess
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
 
-A_SYNC = 0x434e5953
-A_CNXN = 0x4e584e43
-A_OPEN = 0x4e45504f
-A_OKAY = 0x59414b4f
-A_CLSE = 0x45534c43
-A_WRTE = 0x45545257
-
-ID_STAT = 0x54415453
-ID_LIST = 0x5453494c
-ID_ULNK = 0x4b4e4c55
-ID_SEND = 0x444e4553
-ID_RECV = 0x56434552
-ID_DENT = 0x544e4544
-ID_DONE = 0x454e4f44
-ID_DATA = 0x41544144
-ID_OKAY = 0x59414b4f
-ID_FAIL = 0x4c494146
-ID_QUIT = 0x54495551
+MSG_SYNC = 0x434e5953
+MSG_CNXN = 0x4e584e43
+MSG_OPEN = 0x4e45504f
+MSG_OKAY = 0x59414b4f
+MSG_CLSE = 0x45534c43
+MSG_WRTE = 0x45545257
+MSG_STAT = 0x54415453
+MSG_LIST = 0x5453494c
+MSG_ULNK = 0x4b4e4c55
+MSG_SEND = 0x444e4553
+MSG_RECV = 0x56434552
+MSG_DENT = 0x544e4544
+MSG_DONE = 0x454e4f44
+MSG_DATA = 0x41544144
+MSG_FAIL = 0x4c494146
+MSG_QUIT = 0x54495551
 
 
 # Constants
@@ -79,9 +77,11 @@ class ClientBase:
     
     socket = None
     
-    def __init__(self):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
-        pass
+        
+        if address:
+            self.connect(address=address)
         
     def __enter__(self):
         self.connect()
@@ -102,6 +102,9 @@ class ClientBase:
     #FIXME: test, doc
     def connect(self, address=(SERVER_HOST, SERVER_PORT), retry=3):
         """."""
+        
+        if self.socket:
+            return
         
         while retry:
             try:
@@ -128,10 +131,10 @@ class ClientBase:
         followed by a 4-byte hex length and finally the payload if hex length is
         greater than 0.
 
-        If the return status is A_FAIL ADBError will be raised accompanied by the
+        If the return status is MSG_FAIL ADBError will be raised accompanied by the
         error message.
 
-        If the return status is A_OKAY recv() will return a bytestring unless the
+        If the return status is MSG_OKAY recv() will return a bytestring unless the
         expected length is not None but the return size is 0, in which case it is
         assumed a 'host:version' query was sent and a version string will be
         returned.
@@ -147,10 +150,10 @@ class ClientBase:
         followed by a 4-byte hex length and finally the payload if hex length is
         greater than 0.
 
-        If the return status is A_FAIL ADBError will be raised accompanied by the
+        If the return status is MSG_FAIL ADBError will be raised accompanied by the
         error message.
 
-        If the return status is A_OKAY recv() will return a bytestring unless the
+        If the return status is MSG_OKAY recv() will return a bytestring unless the
         expected length is not None but the return size is 0, in which case it is
         assumed a 'host:version' query was sent and a version string will be
         returned.
@@ -161,18 +164,18 @@ class ClientBase:
         #FIXME
         print(ret_status)
         
-        if ret_status == A_FAIL:
+        if ret_status == MSG_FAIL:
             err_size = int(self.socket.recv(4), 16)
             err_bytes = self.socket.recv(err_size)
             
             raise ADBError(err_bytes)
-        elif ret_status == A_OKAY:
+        elif ret_status == MSG_OKAY:
             ret_size = int(self.socket.recv(4), 16)
                 
             if ret_size:
-                ret_bytes = str(self.socket.recv(ret_size))
-                
-            return ret_bytes or str(ret_size) #FIXME
+                return str(self.socket.recv(ret_size))
+            else:
+                return str(int(ret_size, 16))
             
     def send(self, query):
         """."""
@@ -334,7 +337,7 @@ class ServerClient(ClientBase):
         pass
          
             
-class DeviceClient(ClientBase):
+class ADBDClient(ClientBase):
     """."""
     
     def __init__(self):

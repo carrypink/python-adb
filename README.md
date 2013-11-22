@@ -1,14 +1,12 @@
 python-adb
 ==========
 
-A python wrapper for the Android Debugging Bridge
+An (almost) pure python module for the Android Debugging Bridge
 
-This module is meant as a pure wrapper for the 'adb' binary, primarily to wrap
-its commands as functions and raise errors as python exceptions.  The only class
-defined is ADBCommand(), a sub-class of subprocess.Popen().  Like the subprocess
-module there are convenience functions for running custom ADB commands, but the
-intent is to provide functions with proper error handling and IO for each
-command.
+This module is meant as a cross-platform replacement for the UNIX only 'adb' program distributed by Google.
+
+
+** THIS MODULE IS CURRENTLY UNUSABLE **
 
 
 

@@ -33,24 +33,22 @@ import subprocess
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
 
-A_SYNC = 0x434e5953
-A_CNXN = 0x4e584e43
-A_OPEN = 0x4e45504f
-A_OKAY = 0x59414b4f
-A_CLSE = 0x45534c43
-A_WRTE = 0x45545257
-
-ID_STAT = 0x54415453
-ID_LIST = 0x5453494c
-ID_ULNK = 0x4b4e4c55
-ID_SEND = 0x444e4553
-ID_RECV = 0x56434552
-ID_DENT = 0x544e4544
-ID_DONE = 0x454e4f44
-ID_DATA = 0x41544144
-ID_OKAY = 0x59414b4f
-ID_FAIL = 0x4c494146
-ID_QUIT = 0x54495551
+MSG_SYNC = 0x434e5953
+MSG_CNXN = 0x4e584e43
+MSG_OPEN = 0x4e45504f
+MSG_OKAY = 0x59414b4f
+MSG_CLSE = 0x45534c43
+MSG_WRTE = 0x45545257
+MSG_STAT = 0x54415453
+MSG_LIST = 0x5453494c
+MSG_ULNK = 0x4b4e4c55
+MSG_SEND = 0x444e4553
+MSG_RECV = 0x56434552
+MSG_DENT = 0x544e4544
+MSG_DONE = 0x454e4f44
+MSG_DATA = 0x41544144
+MSG_FAIL = 0x4c494146
+MSG_QUIT = 0x54495551
 
 
 # Constants
@@ -79,9 +77,11 @@ class ClientBase:
     
     socket = None
     
-    def __init__(self):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
-        pass
+        
+        if address:
+            self.connect(address=address)
         
     def __enter__(self):
         self.connect()
@@ -103,6 +103,9 @@ class ClientBase:
     def connect(self, address=(SERVER_HOST, SERVER_PORT), retry=3):
         """."""
         
+        if self.socket:
+            return
+        
         while retry:
             try:
                 self.socket = socket.create_connection(address)
@@ -121,67 +124,42 @@ class ClientBase:
             self.socket.close()
             self.socket = None
 
-    def query(self, query):
-        """Send a query to the server.
+    def request(self, query):
+        """Send a request to the server.
 
         Responses from the server are in the form of a 4-byte return status,
         followed by a 4-byte hex length and finally the payload if hex length is
         greater than 0.
 
-        If the return status is A_FAIL ADBError will be raised accompanied by the
+        If the return status is b'FAIL' ADBError will be raised accompanied by the
         error message.
 
-        If the return status is A_OKAY recv() will return a bytestring unless the
+        If the return status is b'OKAY' recv() will return a bytestring unless the
         expected length is not None but the return size is 0, in which case it is
         assumed a 'host:version' query was sent and a version string will be
         returned.
         """
+        
+        if not self.socket:
+            self.connect()
 
-        query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-            
-    #FIXME: test, doc
-    def recv(self):
-        """Receive a message from the server.
-
-        Messages from the server are in the form of a 4-byte return status,
-        followed by a 4-byte hex length and finally the payload if hex length is
-        greater than 0.
-
-        If the return status is A_FAIL ADBError will be raised accompanied by the
-        error message.
-
-        If the return status is A_OKAY recv() will return a bytestring unless the
-        expected length is not None but the return size is 0, in which case it is
-        assumed a 'host:version' query was sent and a version string will be
-        returned.
-
-        """
-        ret_status = self.socket.recv(4)
+        request = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
+        self.socket.send(request)
+        
+        #
+        status = self.socket.recv(4)
         
         #FIXME
-        print(ret_status)
+        print(b'return status: ' + status)
         
-        if ret_status == A_FAIL:
-            err_size = int(self.socket.recv(4), 16)
-            err_bytes = self.socket.recv(err_size)
-            
-            raise ADBError(err_bytes)
-        elif ret_status == A_OKAY:
+        #
+        if status == b'OKAY':
             ret_size = int(self.socket.recv(4), 16)
-                
-            if ret_size:
-                ret_bytes = str(self.socket.recv(ret_size))
-                
-            return ret_bytes or str(ret_size) #FIXME
-            
-    def send(self, query):
-        """."""
-        query = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-        
-        #FIXME
-        print(query)
-        
-        return self.socket.send(query)
+            return self.socket.recv(ret_size)
+        #
+        elif status == b'FAIL':
+            err_size = int(self.socket.recv(4), 16)
+            raise ADBError(self.socket.recv(err_size))
             
 
 class ServerClient(ClientBase):
@@ -193,17 +171,15 @@ class ServerClient(ClientBase):
         
     def version(self):
         """Ask the ADB server for its internal version number."""
-        self.send('host:version')
-        return self.recv()
+        return int(self.request('host:version'), 16)
         
     def devices(self):
         """Ask to return the list of available Android devices and their state.
         
         Returns a byte string that will be dumped as-is by the client.
         """
-        self.send('host:devices')
         
-        return self.recv()
+        return self.request('host:devices')
         
     def kill(self):
         """Ask the ADB server to quit immediately.
@@ -212,9 +188,7 @@ class ServerClient(ClientBase):
         running after an upgrade.
         """
         
-        self.send('host:kill')
-
-        return self.recv()
+        return self.request('host:kill')
         
     def track_devices(self):
         """This is a variant of devices() which doesn't close the
@@ -353,4 +327,5 @@ if __name__ == '__main__':
     with ServerClient() as adbc:
         print('version: ' + str(adbc.version()))
         print('devices: ' + str(adbc.devices()))
+        print('kill: ' + str(adbc.kill()))
     

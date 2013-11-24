@@ -30,8 +30,7 @@ import subprocess
 # Constants
 ###############################################################################
 
-SERVER_HOST = 'localhost'
-SERVER_PORT = 5037
+DEFAULT_SERVER = ('localhost', 5037)
 
 MSG_SYNC = 0x434e5953
 MSG_CNXN = 0x4e584e43
@@ -49,6 +48,19 @@ MSG_DONE = 0x454e4f44
 MSG_DATA = 0x41544144
 MSG_FAIL = 0x4c494146
 MSG_QUIT = 0x54495551
+
+PREFIX_HOST = b'host'
+PREFIX_LOCAL = b'host-local'
+PREFIX_SERIAL = b'host-serial'
+
+TRANSPORT_ANY = b'transport-any'
+"""Either the device or emulator connect to/running on the host."""
+TRANSPORT_LOCAL = b'transport-local'
+"""Ask to switch the connection to one emulator connected through TCP."""
+TRANSPORT_USB = b'transport-usb'
+"""One device connected through USB to the host machine."""
+#FIXME: TRANSPORT_SERIAL = b'transport-serial'
+#FIXME: """."""
 
 
 # Constants
@@ -77,7 +89,7 @@ class ClientBase:
     
     socket = None
     
-    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
+    def __init__(self, address=DEFAULT_SERVER):
         """."""
         
         if address:
@@ -90,6 +102,35 @@ class ClientBase:
     def __exit__(self, exc_type, exc_value, traceback):
         self.disconnect()
         
+    def _recv(self, size):
+        """."""
+        
+        data = b''
+        
+        while len(data) < size:
+            chunk = self.socket.recv(size - len(data))
+            
+            if chunk == b'':
+                raise BrokenPipeError('connection closed')
+                
+            data += chunk
+        else:
+            return data
+            
+    def _send(self, data):
+        """A simple buffered wrapper around socket.send()."""
+        sent = 0
+        
+        while sent < len(data):
+            send = self.socket.send(data[sent:])
+            
+            if send == 0:
+                raise BrokenPipeError('connection closed')
+            
+            sent += send
+        else:
+            return sent
+        
     def _start_server(self):
         """Start the server via adb command line client."""
         adb_bin = shutil.which('adb')
@@ -99,12 +140,17 @@ class ClientBase:
         
         return subprocess.check_output([adb_bin, 'start-server'])
     
-    #FIXME: test, doc
-    def connect(self, address=(SERVER_HOST, SERVER_PORT), retry=3):
-        """."""
+    #FIXME: test
+    def connect(self, address=DEFAULT_SERVER, retry=3):
+        """Connect to an ADB server.
+        
+        By default connect() will attempt to connect to server on localhost,
+        port 5037, and failing to do so will try to (re)start the ADB server
+        and reconnect *retry* times.
+        """
         
         if self.socket:
-            return
+            self.disconnect()
         
         while retry:
             try:
@@ -120,12 +166,18 @@ class ClientBase:
     #FIXME: test, doc
     def disconnect(self):
         """."""
-        if self.socket:
-            self.socket.close()
+        try:
+            if self.socket:
+                self.socket.shutdown(socket.SHUT_RDWR)
+                self.socket.close()
+                self.socket = None
+        except:
             self.socket = None
-
-    def request(self, query):
-        """Send a request to the server.
+            return
+            
+    #FIXME
+    def recv(self):
+        """Receive a response from the server.
 
         Responses from the server are in the form of a 4-byte return status,
         followed by a 4-byte hex length and finally the payload if hex length is
@@ -134,32 +186,30 @@ class ClientBase:
         If the return status is b'FAIL' ADBError will be raised accompanied by the
         error message.
 
-        If the return status is b'OKAY' recv() will return a bytestring unless the
-        expected length is not None but the return size is 0, in which case it is
-        assumed a 'host:version' query was sent and a version string will be
-        returned.
+        If the return status is b'OKAY' recv() will return a bytestring
+        (possibly b'').
         """
         
-        if not self.socket:
-            self.connect()
-
-        request = bytes('{0:0>4x}{1}'.format(len(query), query), 'ascii')
-        self.socket.send(request)
-        
-        #
-        status = self.socket.recv(4)
-        
-        #FIXME
-        print(b'return status: ' + status)
+        status = self._recv(4)
+        size = int(self._recv(4), 16)
         
         #
         if status == b'OKAY':
-            ret_size = int(self.socket.recv(4), 16)
-            return self.socket.recv(ret_size)
+            return self._recv(size)
         #
         elif status == b'FAIL':
-            err_size = int(self.socket.recv(4), 16)
-            raise ADBError(self.socket.recv(err_size))
+            raise ADBError(self._recv(size))
+        else:
+            raise ADBError('unknown protocol error')
+        
+    def send(self, data):
+        """Send a '<host-prefix>:<service-name>' request to the server.
+
+        ADB clients send requests as a 4-byte hexadecimal length followed by
+        the payload."""
+        
+        dataf = bytes('{0:0>4x}{1}'.format(len(data), data), 'ascii')
+        return self._send(dataf)
             
 
 class ServerClient(ClientBase):
@@ -170,16 +220,23 @@ class ServerClient(ClientBase):
         pass
         
     def version(self):
-        """Ask the ADB server for its internal version number."""
-        return int(self.request('host:version'), 16)
+        """Ask the ADB server for its internal version number.
         
-    def devices(self):
+        Returns an integer.
+        """
+        self.send('host:version')
+        
+        return int(self.recv(), 16)
+        
+    def devices(self, long=False):
         """Ask to return the list of available Android devices and their state.
         
         Returns a byte string that will be dumped as-is by the client.
         """
         
-        return self.request('host:devices')
+        self.send('host:devices')
+        
+        return self.recv()
         
     def kill(self):
         """Ask the ADB server to quit immediately.
@@ -188,7 +245,9 @@ class ServerClient(ClientBase):
         running after an upgrade.
         """
         
-        return self.request('host:kill')
+        self.send('host:kill')
+        
+        return self.recv()
         
     def track_devices(self):
         """This is a variant of devices() which doesn't close the
@@ -211,34 +270,19 @@ class ServerClient(ClientBase):
         instances start."""
         pass
         
-    def transport(self, serial_number):
-        """host:transport:<serial-number>
+    #FIXME: figure it out
+    def transport(self, device=TRANSPORT_ANY, serialno=None):
+        """host:<transport>:<serial-number>
+        
         Ask to switch the connection to the device/emulator identified by
         <serial-number>. After the OKAY response, every client request will
         be sent directly to the adbd daemon running on the device.
-        (Used to implement the -s option)"""
-        pass
+        (Used to implement the -s option)
         
-    def transport_usb(self):
-        """host:transport-usb
-        Ask to switch the connection to one device connected through USB
-        to the host machine. This will fail if there are more than one such
-        devices. (Used to implement the -d convenience option)"""
-        pass
-        
-    def transport_local(self):
-        """host:transport-local
-        Ask to switch the connection to one emulator connected through TCP.
-        This will fail if there is more than one such emulator instance
-        running. (Used to implement the -e convenience option)"""
-        pass
-
-    def transport_any(self):
-        """host:transport-any
-    Another host:transport variant. Ask to switch the connection to
-    either the device or emulator connect to/running on the host.
-    Will fail if there is more than one such device/emulator available.
-    (Used when neither -s, -d or -e are provided)"""
+        Ask to switch the connection to the device or emulator identified by
+        *device* which should be one of the TRANSPORT_* constants or a specific
+        identifier (eg. 025657124acd8d2d, emulator-5554, 192.168.0.101:5555).
+        """
         pass
         
     def host_serial(self, serial_number, request):
@@ -269,8 +313,7 @@ class ServerClient(ClientBase):
         pass
         
     def get_product(self):
-        """<host-prefix>:get-product
-    XXX"""
+        """<host-prefix>:get-product"""
         pass
         
     def get_serialno(self):
@@ -315,6 +358,135 @@ class DeviceClient(ClientBase):
         """."""
         pass
         
+    def shell(self, args=None):
+        """Run 'command arg1 arg2 ...' in a shell on the device, and return
+        its output and error streams.
+        
+        Note that arguments must be separated
+        by spaces. If an argument contains a space, it must be quoted with
+        double-quotes. Arguments cannot contain double quotes or things
+        will go very wrong.
+
+        Note that this is the non-interactive version of 'adb shell'
+        
+        ************************************************************
+        
+
+        shell:
+        Start an interactive shell session on the device. Redirect
+        stdin/stdout/stderr as appropriate. Note that the ADB server uses
+        this to implement "adb shell", but will also cook the input before
+        sending it to the device (see interactive_shell() in commandline.c)
+        """
+        pass
+
+    def remount(self):
+        """
+        remount:
+        Ask adbd to remount the device's filesystem in read-write mode,
+        instead of read-only. This is usually necessary before performing
+        an "adb sync" or "adb push" request.
+
+        This request may not succeed on certain builds which do not allow
+        that."""
+    def dev(self, path):
+        """
+
+        dev:<path>
+        Opens a device file and connects the client directly to it for
+        read/write purposes. Useful for debugging, but may require special
+        privileges and thus may not run on all devices. <path> is a full
+        path from the root of the filesystem.
+        """
+        pass
+
+"""
+tcp:<port>
+    Tries to connect to tcp port <port> on localhost.
+
+tcp:<port>:<server-name>
+    Tries to connect to tcp port <port> on machine <server-name> from
+    the device. This can be useful to debug some networking/proxy
+    issues that can only be revealed on the device itself.
+
+local:<path>
+    Tries to connect to a Unix domain socket <path> on the device
+
+localreserved:<path>
+localabstract:<path>
+localfilesystem:<path>
+    Variants of local:<path> that are used to access other Android
+    socket namespaces.
+
+log:<name>
+    Opens one of the system logs (/dev/log/<name>) and allows the client
+    to read them directly. Used to implement 'adb logcat'. The stream
+    will be read-only for the client.
+
+framebuffer:
+    This service is used to send snapshots of the framebuffer to a client.
+    It requires sufficient privileges but works as follow:
+
+      After the OKAY, the service sends 16-byte binary structure
+      containing the following fields (little-endian format):
+
+            depth:   uint32_t:    framebuffer depth
+            size:    uint32_t:    framebuffer size in bytes
+            width:   uint32_t:    framebuffer width in pixels
+            height:  uint32_t:    framebuffer height in pixels
+
+      With the current implementation, depth is always 16, and
+      size is always width*height*2
+
+      Then, each time the client wants a snapshot, it should send
+      one byte through the channel, which will trigger the service
+      to send it 'size' bytes of framebuffer data.
+
+      If the adbd daemon doesn't have sufficient privileges to open
+      the framebuffer device, the connection is simply closed immediately.
+
+dns:<server-name>
+    This service is an exception because it only runs within the ADB server.
+    It is used to implement USB networking, i.e. to provide a network connection
+    to the device through the host machine (note: this is the exact opposite of
+    network tethering).
+
+    It is used to perform a gethostbyname(<address>) on the host and return
+    the corresponding IP address as a 4-byte string.
+
+recover:<size>
+    This service is used to upload a recovery image to the device. <size>
+    must be a number corresponding to the size of the file. The service works
+    by:
+
+       - creating a file named /tmp/update
+       - reading 'size' bytes from the client and writing them to /tmp/update
+       - when everything is read successfully, create a file named /tmp/update.start
+
+    This service can only work when the device is in recovery mode. Otherwise,
+    the /tmp directory doesn't exist and the connection will be closed immediately.
+
+jdwp:<pid>
+    Connects to the JDWP thread running in the VM of process <pid>.
+
+track-jdwp
+    This is used to send the list of JDWP pids periodically to the client.
+    The format of the returned data is the following:
+
+        <hex4>:    the length of all content as a 4-char hexadecimal string
+        <content>: a series of ASCII lines of the following format:
+                        <pid> "\n"
+
+    This service is used by DDMS to know which debuggable processes are running
+    on the device/emulator.
+
+    Note that there is no single-shot service to retrieve the list only once.
+
+sync:
+    This starts the file synchronisation service, used to implement "adb push"
+    and "adb pull". Since this service is pretty complex, it will be detailed
+    in a companion document named SYNC.TXT."""
+        
         
 class Server:
     """."""
@@ -325,7 +497,7 @@ class Server:
 if __name__ == '__main__':
     
     with ServerClient() as adbc:
-        print('version: ' + str(adbc.version()))
+        #print('version: ' + str(adbc.version()))
         print('devices: ' + str(adbc.devices()))
         print('kill: ' + str(adbc.kill()))
     

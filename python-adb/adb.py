@@ -327,29 +327,63 @@ class ServerClient(ClientBase):
     Returns the state of a given device as a string."""
         pass
         
-    def forward(self):
+    def forward(self, norebind=False):
         """<host-prefix>:forward:<local>;<remote>
-    Asks the ADB server to forward local connections from <local>
-    to the <remote> address on a given device.
+        Asks the ADB server to forward local connections from <local>
+        to the <remote> address on a given device.
 
-    There, <host-prefix> can be one of the
-    host-serial/host-usb/host-local/host prefixes as described previously
-    and indicates which device/emulator to target.
+        <host-prefix>:forward:norebind:<local>;<remote>
+        Same as <host-prefix>:forward:<local>;<remote> except that it will
+        fail it there is already a forward connection from <local>.
 
-    the format of <local> is one of:
+        Used to implement 'adb forward --no-rebind <local> <remote>'
 
-        tcp:<port>      -> TCP connection on localhost:<port>
-        local:<path>    -> Unix local domain socket on <path>
+        There, <host-prefix> can be one of the
+        host-serial/host-usb/host-local/host prefixes as described previously
+        and indicates which device/emulator to target.
 
-    the format of <remote> is one of:
+        the format of <local> is one of:
 
-        tcp:<port>      -> TCP localhost:<port> on device
-        local:<path>    -> Unix local domain socket on device
-        jdwp:<pid>      -> JDWP thread on VM process <pid>
+            tcp:<port>      -> TCP connection on localhost:<port>
+            local:<path>    -> Unix local domain socket on <path>
 
-    or even any one of the local services described below."""
+        the format of <remote> is one of:
+
+            tcp:<port>      -> TCP localhost:<port> on device
+            local:<path>    -> Unix local domain socket on device
+            jdwp:<pid>      -> JDWP thread on VM process <pid>
+
+        or even any one of the local services described below."""
         pass
-         
+        
+    def killforward(self, all=False):
+         """<host-prefix>:killforward:<local>
+            Remove any existing forward local connection from <local>.
+            This is used to implement 'adb forward --remove <local>'
+
+        <host-prefix>:killforward-all
+            Remove all forward network connections.
+            This is used to implement 'adb forward --remove-all'."""
+        pass
+
+    def list_forward(self)
+        """
+        <host-prefix>:list-forward
+            List all existing forward connections from this server.
+            This returns something that looks like the following:
+
+               <hex4>: The length of the payload, as 4 hexadecimal chars.
+               <payload>: A series of lines of the following format:
+
+                 <serial> " " <local> " " <remote> "\n"
+
+            Where <serial> is a device serial number.
+                  <local>  is the host-specific endpoint (e.g. tcp:9000).
+                  <remote> is the device-specific endpoint.
+
+            Used to implement 'adb forward --list'."""
+        pass
+        
             
 class DeviceClient(ClientBase):
     """."""

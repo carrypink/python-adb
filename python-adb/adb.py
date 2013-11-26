@@ -30,7 +30,9 @@ import subprocess
 # Constants
 ###############################################################################
 
-DEFAULT_SERVER = ('localhost', 5037)
+DEFAULT_HOST = 'localhost'
+DEFAULT_PORT = 5037
+DEFAULT_SERVER = (DEFAULT_HOST, DEFAULT_PORT)
 
 MSG_SYNC = 0x434e5953
 MSG_CNXN = 0x4e584e43
@@ -49,9 +51,9 @@ MSG_DATA = 0x41544144
 MSG_FAIL = 0x4c494146
 MSG_QUIT = 0x54495551
 
-PREFIX_HOST = b'host'
-PREFIX_LOCAL = b'host-local'
-PREFIX_SERIAL = b'host-serial'
+HOST_ANY = b'host'
+HOST_LOCAL = b'host-local'
+HOST_SERIAL = b'host-serial'
 
 TRANSPORT_ANY = b'transport-any'
 """Either the device or emulator connect to/running on the host."""
@@ -103,7 +105,7 @@ class ClientBase:
         self.disconnect()
         
     def _recv(self, size):
-        """."""
+        """A simple buffered wrapper around socket.recv()."""
         
         data = b''
         
@@ -119,17 +121,17 @@ class ClientBase:
             
     def _send(self, data):
         """A simple buffered wrapper around socket.send()."""
-        sent = 0
+        total_sent = 0
         
         while sent < len(data):
-            send = self.socket.send(data[sent:])
+            sent = self.socket.send(data[total_sent:])
             
-            if send == 0:
+            if sent == 0:
                 raise BrokenPipeError('connection closed')
             
-            sent += send
+            total_sent += sent
         else:
-            return sent
+            return total_sent
         
     def _start_server(self):
         """Start the server via adb command line client."""
@@ -202,7 +204,7 @@ class ClientBase:
         else:
             raise ADBError('unknown protocol error')
         
-    def send(self, data):
+    def send(self, data, host=HOST_ANY):
         """Send a '<host-prefix>:<service-name>' request to the server.
 
         ADB clients send requests as a 4-byte hexadecimal length followed by
@@ -228,6 +230,7 @@ class ServerClient(ClientBase):
         
         return int(self.recv(), 16)
         
+    #FIXME: long, conn closed after, format response
     def devices(self, long=False):
         """Ask to return the list of available Android devices and their state.
         
@@ -257,7 +260,8 @@ class ServerClient(ClientBase):
         to track the state of connected devices in real-time without
         polling the server repeatedly."""
         pass
-        
+    
+    #FIXME: response, doc, test
     def emulator(self, port):
         """host:emulator:<port>
         This is a special query that is sent to the ADB server when a
@@ -268,7 +272,10 @@ class ServerClient(ClientBase):
 
         This mechanism allows the ADB server to know when new emulator
         instances start."""
-        pass
+        
+        self.send('host:emulator:' + str(port))
+        
+        return self.recv()
         
     #FIXME: figure it out
     def transport(self, device=TRANSPORT_ANY, serialno=None):

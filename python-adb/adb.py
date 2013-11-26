@@ -34,6 +34,10 @@ DEFAULT_HOST = 'localhost'
 DEFAULT_PORT = 5037
 DEFAULT_SERVER = (DEFAULT_HOST, DEFAULT_PORT)
 
+VERSION_MAJOR = 1
+VERSION_MINOR = 0
+VERSION_SERVER = 29
+
 MSG_SYNC = 0x434e5953
 MSG_CNXN = 0x4e584e43
 MSG_OPEN = 0x4e45504f
@@ -52,8 +56,11 @@ MSG_FAIL = 0x4c494146
 MSG_QUIT = 0x54495551
 
 HOST_ANY = b'host'
+"""."""
 HOST_LOCAL = b'host-local'
+"""."""
 HOST_SERIAL = b'host-serial'
+"""."""
 
 TRANSPORT_ANY = b'transport-any'
 """Either the device or emulator connect to/running on the host."""
@@ -113,7 +120,7 @@ class ClientBase:
             chunk = self.socket.recv(size - len(data))
             
             if chunk == b'':
-                raise BrokenPipeError('socket closed')
+                raise BrokenPipeError('connection closed')
                 
             data += chunk
         else:
@@ -133,16 +140,12 @@ class ClientBase:
         else:
             return total_sent
         
+    #FIXME: use adb.HostServer()
     def _start_server(self):
         """Start the server via adb command line client."""
-        adb_bin = shutil.which('adb')
-        
-        if not adb_bin:
-            raise ADBError('can not find "adb" binary in PATH')
-        
-        return subprocess.check_output([adb_bin, 'start-server'])
+        return subprocess.check_output(['adb', 'start-server'])
     
-    #FIXME: test
+    #FIXME: _adb_connect()/adb_connect()
     def connect(self, address=DEFAULT_SERVER, retry=3):
         """Connect to an ADB server.
         
@@ -156,15 +159,21 @@ class ClientBase:
         
         while retry:
             try:
-                #FIXME: AF_INET, SOCK_STREAM, SOCK_NONBLOCK
-                self.socket = socket.create_connection(address)
+                #FIXME: SOCK_NONBLOCK??
+                self.socket = socket.socket(AF_INET, socket.SOCK_STREAM)
+                self.socket.connect(address)
+                
+                self.send('host:version')
+                
+                if int(self.recv(), 16) != VERSION_SERVER:
+                    raise ADBError('invalid protocol version')
                 break
             except ConnectionRefusedError:
                 self._start_server()
                 retry -= 1
         else:
             #FIXME: use ConnectionError
-            raise ADBError("Could not connect to server.")
+            raise ConnectionRefusedError("Could not connect to server.")
 
     #FIXME: test, doc
     def disconnect(self):
@@ -218,10 +227,6 @@ class ClientBase:
 class HostClient(ClientBase):
     """."""
     
-    def __init__(self):
-        """."""
-        pass
-        
     def version(self):
         """Ask the ADB server for its internal version number.
         

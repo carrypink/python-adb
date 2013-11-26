@@ -156,6 +156,7 @@ class ClientBase:
         
         while retry:
             try:
+                #FIXME: AF_INET, SOCK_STREAM, SOCK_NONBLOCK
                 self.socket = socket.create_connection(address)
                 break
             except ConnectionRefusedError:

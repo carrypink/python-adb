@@ -113,7 +113,7 @@ class ClientBase:
             chunk = self.socket.recv(size - len(data))
             
             if chunk == b'':
-                raise BrokenPipeError('connection closed')
+                raise BrokenPipeError('socket closed')
                 
             data += chunk
         else:
@@ -123,7 +123,7 @@ class ClientBase:
         """A simple buffered wrapper around socket.send()."""
         total_sent = 0
         
-        while sent < len(data):
+        while total_sent < len(data):
             sent = self.socket.send(data[total_sent:])
             
             if sent == 0:
@@ -215,7 +215,7 @@ class ClientBase:
         return self._send(dataf)
             
 
-class ServerClient(ClientBase):
+class HostClient(ClientBase):
     """."""
     
     def __init__(self):
@@ -365,16 +365,17 @@ class ServerClient(ClientBase):
         pass
         
     def killforward(self, all=False):
-         """<host-prefix>:killforward:<local>
-            Remove any existing forward local connection from <local>.
-            This is used to implement 'adb forward --remove <local>'
+        """<host-prefix>:killforward:<local>
+        Remove any existing forward local connection from <local>.
+        This is used to implement 'adb forward --remove <local>'
 
         <host-prefix>:killforward-all
-            Remove all forward network connections.
-            This is used to implement 'adb forward --remove-all'."""
+        Remove all forward network connections.
+        This is used to implement 'adb forward --remove-all'.
+        """
         pass
 
-    def list_forward(self)
+    def list_forward(self):
         """
         <host-prefix>:list-forward
             List all existing forward connections from this server.
@@ -393,13 +394,15 @@ class ServerClient(ClientBase):
         pass
         
             
-class DeviceClient(ClientBase):
+class LocalClient(ClientBase):
     """."""
     
-    def __init__(self):
+    #FIXME
+    def __init__(self, address=DEFAULT_SERVER, device=TRANSPORT_ANY):
         """."""
         pass
         
+    #FIXME
     def shell(self, args=None):
         """Run 'command arg1 arg2 ...' in a shell on the device, and return
         its output and error streams.
@@ -422,6 +425,7 @@ class DeviceClient(ClientBase):
         """
         pass
 
+    #FIXME
     def remount(self):
         """
         remount:
@@ -431,6 +435,9 @@ class DeviceClient(ClientBase):
 
         This request may not succeed on certain builds which do not allow
         that."""
+        pass
+        
+    #FIXME
     def dev(self, path):
         """
 
@@ -530,7 +537,19 @@ sync:
     in a companion document named SYNC.TXT."""
         
         
-class Server:
+class ServerBase:
+    """."""
+    
+    pass
+    
+    
+class HostServer(ServerBase):
+    """."""
+    
+    pass
+    
+    
+class LocalServer(ServerBase):
     """."""
     
     pass
@@ -538,7 +557,7 @@ class Server:
         
 if __name__ == '__main__':
     
-    with ServerClient() as adbc:
+    with HostClient() as adbc:
         #print('version: ' + str(adbc.version()))
         print('devices: ' + str(adbc.devices()))
         print('kill: ' + str(adbc.kill()))

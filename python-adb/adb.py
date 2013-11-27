@@ -25,14 +25,14 @@ import os
 import shutil
 import socket
 import subprocess
+import time
 
 
 # Constants
 ###############################################################################
 
-DEFAULT_HOST = 'localhost'
-DEFAULT_PORT = 5037
-DEFAULT_SERVER = (DEFAULT_HOST, DEFAULT_PORT)
+SERVER_HOST = socket.INADDR_LOOPBACK
+SERVER_PORT = 5037
 
 VERSION_MAJOR = 1
 VERSION_MINOR = 0
@@ -98,7 +98,7 @@ class ClientBase:
     
     socket = None
     
-    def __init__(self, address=DEFAULT_SERVER):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT):
         """."""
         
         if address:
@@ -146,33 +146,39 @@ class ClientBase:
         return subprocess.check_output(['adb', 'start-server'])
     
     #FIXME: _adb_connect()/adb_connect()
-    def connect(self, address=DEFAULT_SERVER, retry=3):
+    def connect(self, address=(SERVER_HOST, SERVER_PORT)):
         """Connect to an ADB server.
         
-        By default connect() will attempt to connect to server on localhost,
-        port 5037, and failing to do so will try to (re)start the ADB server
-        and reconnect *retry* times.
+        FIXME
         """
         
         if self.socket:
             self.disconnect()
+            
+        retry = 3
         
         while retry:
             try:
-                #FIXME: SOCK_NONBLOCK??
+                #FIXME: SOCK_NONBLOCK?
                 self.socket = socket.socket(AF_INET, socket.SOCK_STREAM)
                 self.socket.connect(address)
                 
+                # Check server version & restart if necessary
                 self.send('host:version')
                 
                 if int(self.recv(), 16) != VERSION_SERVER:
-                    raise ADBError('invalid protocol version')
+                    self.send('host:kill')
+                    time.sleep(2)
+                    subprocess.check_output(['adb', 'start-server'])
+                    
                 break
             except ConnectionRefusedError:
-                self._start_server()
+                #FIXME: use adb.HostServer()
+                subprocess.check_output(['adb', 'start-server'])
+                # give the server some time to start properly and detect devices
+                time.sleep(3)
                 retry -= 1
         else:
-            #FIXME: use ConnectionError
             raise ConnectionRefusedError("Could not connect to server.")
 
     #FIXME: test, doc
@@ -180,7 +186,8 @@ class ClientBase:
         """."""
         try:
             if self.socket:
-                self.socket.shutdown(socket.SHUT_RDWR)
+                # I don't think adb calls shutdown() (naughty)
+                #self.socket.shutdown(socket.SHUT_RDWR)
                 self.socket.close()
                 self.socket = None
         except:

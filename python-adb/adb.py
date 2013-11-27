@@ -246,7 +246,7 @@ class ClientBase:
         else:
             data = b':'.join([host, data])
             
-        data = bytes('{0:0>4x}{1}'.format(len(data), data), 'ascii')
+        data = '{0:0>4x}{1}'.format(len(data), data).encode('ascii')
         
         return self.send(data)
             
@@ -296,7 +296,8 @@ class HostClient(ClientBase):
     
     #FIXME: response, doc, test
     def emulator(self, port):
-        """host:emulator:<port>
+        """Inform the server an emulator has started.
+
         This is a special query that is sent to the ADB server when a
         new emulator starts up. <port> is a decimal number corresponding
         to the emulator's ADB control port, i.e. the TCP port that the
@@ -325,46 +326,19 @@ class HostClient(ClientBase):
         """
         pass
         
-    def host_serial(self, serial_number, request):
-        """host-serial:<serial-number>:<request>
-        This is a special form of query, where the 'host-serial:<serial-number>:'
-        prefix can be used to indicate that the client is asking the ADB server
-        for information related to a specific device. <request> can be in one
-        of the format described below."""
-        pass
-            
-    def host_usb(self, request):
-        """host-usb:<request>
-    A variant of host-serial used to target the single USB device connected
-    to the host. This will fail if there is none or more than one."""
-        pass
-        
-    def host_local(self, request):
-        """host-local:<request>
-    A variant of host-serial used to target the single emulator instance
-    running on the host. This will fail if there is none or more than one."""
-        pass
-        
-    def host(self, request):
-        """host:<request>
-    When asking for information related to a device, 'host:' can also be
-    interpreted as 'any single device or emulator connected to/running on
-    the host'."""
-        pass
-        
     def get_product(self):
         """<host-prefix>:get-product"""
         pass
         
     def get_serialno(self):
-        """<host-prefix>:get-serialno
-    Returns the serial number of the corresponding device/emulator.
-    Note that emulator serial numbers are of the form 'emulator-5554'"""
+        """Return the serial number of the corresponding device/emulator.
+    
+        Note that emulator serial numbers are of the form 'emulator-5554'
+        """
         pass
         
     def get_state(self):
-        """<host-prefix>:get-state
-    Returns the state of a given device as a string."""
+        """Returns the state of a given device as a string."""
         pass
         
     def forward(self, norebind=False):

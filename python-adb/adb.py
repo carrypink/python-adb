@@ -31,7 +31,7 @@ import time
 # Constants
 ###############################################################################
 
-SERVER_HOST = socket.INADDR_LOOPBACK
+SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
 
 VERSION_MAJOR = 1
@@ -98,7 +98,7 @@ class ClientBase:
     
     socket = None
     
-    def __init__(self, address=(SERVER_HOST, SERVER_PORT):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
         
         if address:
@@ -110,42 +110,8 @@ class ClientBase:
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.disconnect()
-        
-    def _recv(self, size):
-        """A simple buffered wrapper around socket.recv()."""
-        
-        data = b''
-        
-        while len(data) < size:
-            chunk = self.socket.recv(size - len(data))
-            
-            if chunk == b'':
-                raise BrokenPipeError('connection closed')
-                
-            data += chunk
-        else:
-            return data
-            
-    def _send(self, data):
-        """A simple buffered wrapper around socket.send()."""
-        total_sent = 0
-        
-        while total_sent < len(data):
-            sent = self.socket.send(data[total_sent:])
-            
-            if sent == 0:
-                raise BrokenPipeError('connection closed')
-            
-            total_sent += sent
-        else:
-            return total_sent
-        
-    #FIXME: use adb.HostServer()
-    def _start_server(self):
-        """Start the server via adb command line client."""
-        return subprocess.check_output(['adb', 'start-server'])
     
-    #FIXME: _adb_connect()/adb_connect()
+    #FIXME: see _adb_connect()/adb_connect() in adb_client.c
     def connect(self, address=(SERVER_HOST, SERVER_PORT)):
         """Connect to an ADB server.
         
@@ -159,15 +125,17 @@ class ClientBase:
         
         while retry:
             try:
-                #FIXME: SOCK_NONBLOCK?
-                self.socket = socket.socket(AF_INET, socket.SOCK_STREAM)
+                #FIXME: are client sockets non-blocking?
+                # Open a socket and connect to the server
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socket.connect(address)
                 
+                # FIXME: why does adb_client.c decrement VERSION_SERVER before
                 # Check server version & restart if necessary
-                self.send('host:version')
+                self.sendmsg(b'version')
                 
-                if int(self.recv(), 16) != VERSION_SERVER:
-                    self.send('host:kill')
+                if int(self.recvmsg(), 16) != VERSION_SERVER:
+                    self.sendmsg(b'kill')
                     time.sleep(2)
                     subprocess.check_output(['adb', 'start-server'])
                     
@@ -184,6 +152,7 @@ class ClientBase:
     #FIXME: test, doc
     def disconnect(self):
         """."""
+        
         try:
             if self.socket:
                 # I don't think adb calls shutdown() (naughty)
@@ -195,7 +164,22 @@ class ClientBase:
             return
             
     #FIXME
-    def recv(self):
+    def recv(self, size):
+        """A simple buffered wrapper around socket.recv()."""
+        
+        data = b''
+        
+        while len(data) < size:
+            chunk = self.socket.recv(size - len(data))
+            
+            if chunk == b'':
+                raise BrokenPipeError('connection closed')
+                
+            data += chunk
+        else:
+            return data
+        
+    def recvmsg(self):
         """Receive a response from the server.
 
         Responses from the server are in the form of a 4-byte return status,
@@ -209,26 +193,62 @@ class ClientBase:
         (possibly b'').
         """
         
-        status = self._recv(4)
-        size = int(self._recv(4), 16)
+        status = self.recv(4)
+        size = int(self.recv(4), 16)
         
         #
         if status == b'OKAY':
-            return self._recv(size)
+            return self.recv(size)
         #
         elif status == b'FAIL':
-            raise ADBError(self._recv(size))
+            raise ADBError(self.recv(size))
         else:
             raise ADBError('unknown protocol error')
+            
+    def send(self, data):
+        """Send data to the socket.
         
-    def send(self, data, host=HOST_ANY):
-        """Send a '<host-prefix>:<service-name>' request to the server.
+        A convenience wrapper around socket.send() that will retry on
+        InterruptedError (EINTR) and incomplete send.  Returns the number of
+        bytes sent on success and raises BrokenPipeError on fail.
+        """
+        total_sent = 0
+        
+        print(data)
+        
+        while total_sent < len(data):
+            try:
+                sent = self.socket.send(data[total_sent:])
+                
+                if sent == 0:
+                    raise BrokenPipeError('disconnected')
+                
+                total_sent += sent
+            except InterruptedError:
+                pass
+        else:
+            return total_sent
+        
+    def sendmsg(self, data, host=HOST_ANY, serialno=None):
+        """Send a formatted request to the server.
 
         ADB clients send requests as a 4-byte hexadecimal length followed by
-        the payload."""
+        the payload.  This function is a high-level wrapper around
+        ClientBase.send() which creates a complete message from *data* and
+        *host* before sending.
         
-        dataf = bytes('{0:0>4x}{1}'.format(len(data), data), 'ascii')
-        return self._send(dataf)
+        *host* should be one of the HOST_* constants described above.  If
+        *host* is HOST_SERIAL *serialno* must not be None.
+        """
+        
+        if host == HOST_SERIAL:
+            data = b':'.join([host, serialno, data])
+        else:
+            data = b':'.join([host, data])
+            
+        data = bytes('{0:0>4x}{1}'.format(len(data), data), 'ascii')
+        
+        return self.send(data)
             
 
 class HostClient(ClientBase):
@@ -239,9 +259,9 @@ class HostClient(ClientBase):
         
         Returns an integer.
         """
-        self.send('host:version')
+        self.sendmsg(b'version')
         
-        return int(self.recv(), 16)
+        return int(self.recvmsg(), 16)
         
     #FIXME: long, conn closed after, format response
     def devices(self, long=False):
@@ -250,9 +270,9 @@ class HostClient(ClientBase):
         Returns a byte string that will be dumped as-is by the client.
         """
         
-        self.send('host:devices')
+        self.sendmsg(b'devices')
         
-        return self.recv()
+        return self.recvmsg()
         
     def kill(self):
         """Ask the ADB server to quit immediately.
@@ -261,9 +281,9 @@ class HostClient(ClientBase):
         running after an upgrade.
         """
         
-        self.send('host:kill')
+        self.sendmsg(b'kill')
         
-        return self.recv()
+        return self.recvmsg()
         
     def track_devices(self):
         """This is a variant of devices() which doesn't close the
@@ -286,7 +306,7 @@ class HostClient(ClientBase):
         This mechanism allows the ADB server to know when new emulator
         instances start."""
         
-        self.send('host:emulator:' + str(port))
+        self.send(b'host:emulator:' + str(port))
         
         return self.recv()
         
@@ -410,7 +430,7 @@ class LocalClient(ClientBase):
     """."""
     
     #FIXME
-    def __init__(self, address=DEFAULT_SERVER, device=TRANSPORT_ANY):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT), device=TRANSPORT_ANY):
         """."""
         pass
         
@@ -572,5 +592,5 @@ if __name__ == '__main__':
     with HostClient() as adbc:
         #print('version: ' + str(adbc.version()))
         print('devices: ' + str(adbc.devices()))
-        print('kill: ' + str(adbc.kill()))
+        #print('kill: ' + str(adbc.kill()))
     

@@ -16,7 +16,7 @@
 
 # Copyright 2012,2013 Andrew Holmes <andrew.g.r.holmes@gmail.com>
 
-r"""adb - A (almost) pure python adb client
+r"""adb - A (almost) pure python adb module
 
 """
 
@@ -31,13 +31,16 @@ import time
 # Constants
 ###############################################################################
 
+#FIXME: adb_client.c uses socket.ADDR_LOOPBACK
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5037
 
+#FIXME: rather unpythonic
 VERSION_MAJOR = 1
 VERSION_MINOR = 0
 VERSION_SERVER = 29
 
+#FIXME: need these?
 MSG_SYNC = 0x434e5953
 MSG_CNXN = 0x4e584e43
 MSG_OPEN = 0x4e45504f
@@ -55,21 +58,23 @@ MSG_DATA = 0x41544144
 MSG_FAIL = 0x4c494146
 MSG_QUIT = 0x54495551
 
-HOST_ANY = b'host'
+#FIXME: better desc.
+HOST_ANY = 'host'
 """."""
-HOST_LOCAL = b'host-local'
+HOST_LOCAL = 'host-local'
 """."""
-HOST_SERIAL = b'host-serial'
+HOST_SERIAL = 'host-serial'
 """."""
 
-TRANSPORT_ANY = b'transport-any'
-"""Either the device or emulator connect to/running on the host."""
-TRANSPORT_LOCAL = b'transport-local'
-"""Ask to switch the connection to one emulator connected through TCP."""
-TRANSPORT_USB = b'transport-usb'
+#FIXME: better desc.
+TRANSPORT_ANY = 'transport-any'
+"""One device or emulator connected to the host machine."""
+TRANSPORT_LOCAL = 'transport-local'
+"""One emulator connected through TCP."""
+TRANSPORT_USB = 'transport-usb'
 """One device connected through USB to the host machine."""
-#FIXME: TRANSPORT_SERIAL = b'transport-serial'
-#FIXME: """."""
+TRANSPORT_SERIAL = 'transport'
+"""One device identified by serial number."""
 
 
 # Constants
@@ -132,10 +137,10 @@ class ClientBase:
                 
                 # FIXME: why does adb_client.c decrement VERSION_SERVER before
                 # Check server version & restart if necessary
-                self.sendmsg(b'version')
+                self.sendmsg('version')
                 
                 if int(self.recvmsg(), 16) != VERSION_SERVER:
-                    self.sendmsg(b'kill')
+                    self.sendmsg('kill')
                     time.sleep(2)
                     subprocess.check_output(['adb', 'start-server'])
                     
@@ -178,7 +183,8 @@ class ClientBase:
             data += chunk
         else:
             return data
-        
+    
+    #FIXME: doc
     def recvmsg(self):
         """Receive a response from the server.
 
@@ -205,15 +211,19 @@ class ClientBase:
         else:
             raise ADBError('unknown protocol error')
             
+    #FIXME: doc & test
     def send(self, data):
         """Send data to the socket.
         
         A convenience wrapper around socket.send() that will retry on
         InterruptedError (EINTR) and incomplete send.  Returns the number of
         bytes sent on success and raises BrokenPipeError on fail.
+        
+        *data* should be a properly formatted ADB message.
         """
         total_sent = 0
         
+        #DEBUG
         print(data)
         
         while total_sent < len(data):
@@ -259,7 +269,7 @@ class HostClient(ClientBase):
         
         Returns an integer.
         """
-        self.sendmsg(b'version')
+        self.sendmsg('version')
         
         return int(self.recvmsg(), 16)
         
@@ -270,7 +280,7 @@ class HostClient(ClientBase):
         Returns a byte string that will be dumped as-is by the client.
         """
         
-        self.sendmsg(b'devices')
+        self.sendmsg('devices')
         
         return self.recvmsg()
         
@@ -281,7 +291,7 @@ class HostClient(ClientBase):
         running after an upgrade.
         """
         
-        self.sendmsg(b'kill')
+        self.sendmsg('kill')
         
         return self.recvmsg()
         
@@ -303,20 +313,18 @@ class HostClient(ClientBase):
         to the emulator's ADB control port, i.e. the TCP port that the
         emulator will forward automatically to the adbd daemon running
         in the emulator system.
-
-        This mechanism allows the ADB server to know when new emulator
-        instances start."""
+        """
         
-        self.send(b'host:emulator:' + str(port))
+        self.send('emulator:' + str(port))
         
         return self.recv()
         
-    #FIXME: figure it out
+    #FIXME: figure it out, doc
     def transport(self, device=TRANSPORT_ANY, serialno=None):
-        """host:<transport>:<serial-number>
+        """Ask to switch the connection to the device/emulator identified by
+        <serial-number>.
         
-        Ask to switch the connection to the device/emulator identified by
-        <serial-number>. After the OKAY response, every client request will
+        After the OKAY response, every client request will
         be sent directly to the adbd daemon running on the device.
         (Used to implement the -s option)
         
@@ -326,22 +334,23 @@ class HostClient(ClientBase):
         """
         pass
         
-    def get_product(self):
+    def get_product(self, host=HOST_ANY):
         """<host-prefix>:get-product"""
         pass
         
-    def get_serialno(self):
+    def get_serialno(self, host=HOST_ANY):
         """Return the serial number of the corresponding device/emulator.
     
         Note that emulator serial numbers are of the form 'emulator-5554'
         """
         pass
         
-    def get_state(self):
+    def get_state(self, host=HOST_ANY):
         """Returns the state of a given device as a string."""
         pass
         
-    def forward(self, norebind=False):
+    #FIXME: combine the next 3 methods to be more pythonic
+    def forward(self, norebind=False, host=HOST_ANY):
         """<host-prefix>:forward:<local>;<remote>
         Asks the ADB server to forward local connections from <local>
         to the <remote> address on a given device.
@@ -370,7 +379,7 @@ class HostClient(ClientBase):
         or even any one of the local services described below."""
         pass
         
-    def killforward(self, all=False):
+    def killforward(self, all=False, host=HOST_ANY):
         """<host-prefix>:killforward:<local>
         Remove any existing forward local connection from <local>.
         This is used to implement 'adb forward --remove <local>'
@@ -381,7 +390,7 @@ class HostClient(ClientBase):
         """
         pass
 
-    def list_forward(self):
+    def list_forward(self, host=HOST_ANY):
         """
         <host-prefix>:list-forward
             List all existing forward connections from this server.

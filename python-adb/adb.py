@@ -101,7 +101,7 @@ class ADBClientError(ADBError):
 class ClientSocket(socket.socket):
     """."""
     
-    def __init__(self):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT), ):
         """."""
         
         #FIXME: are client sockets non-blocking?
@@ -114,11 +114,19 @@ class ClientSocket(socket.socket):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
         
+    def _kill_server(self):
+        self.command('kill')
+        time.sleep(2)
+        
+    def _start_server(self):
+        subprocess.check_output(['adb', 'start-server'])
+        time.sleep(3)
+        
     def _handshake(self):
         """."""
         # FIXME: why does adb_client.c decrement VERSION_SERVER before
         # Check server version & restart if necessary
-        if int(self.query('version'), 16) - 2 != VERSION_SERVER:
+        if int(self.query('version'), 16) - 1 != VERSION_SERVER:
             raise ADBError('old version')
     
     #FIXME: see _adb_connect()/adb_connect() in adb_client.c
@@ -132,24 +140,25 @@ class ClientSocket(socket.socket):
         try:
             socket.socket.connect(self, address)
             self._handshake()
+            
+        # Old server still running
+        except ADBError:
+            self.command('kill')
+            time.sleep(2)
+            
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            #socket.socket.connect(self, address)
+            
+            #FIXME self._handshake()
                 
-        # Try starting the server
+        # Server not running
         except ConnectionRefusedError:
             #TODO: use adb.HostServer()
             subprocess.check_output(['adb', 'start-server'])
             # give the server some time to start properly and detect devices
             time.sleep(3)
             socket.socket.connect(self, address)
-            
-        # Try restarting the server
-        except ADBError:
-            self.command('kill')
-            time.sleep(2)
-            subprocess.check_output(['adb', 'start-server'])
-            time.sleep(3)
-            
-            # Give it another try
-            #socket.socket.connect(self, address)
             
             self._handshake()
             
@@ -192,6 +201,8 @@ class ClientSocket(socket.socket):
         """
         total_sent = 0
         
+        print(data)
+        
         while total_sent < len(data):
             try:
                 sent = socket.socket.send(self, data[total_sent:])
@@ -206,7 +217,7 @@ class ClientSocket(socket.socket):
         else:
             return total_sent
         
-    #FIXME: doc
+    #FIXME: don't like
     def command(self, data, host=HOST_ANY, serialno=None):
         """Send a formatted request to the server.
 

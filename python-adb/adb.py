@@ -101,21 +101,25 @@ class ADBClientError(ADBError):
 class ClientSocket(socket.socket):
     """."""
     
-    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
+    def __init__(self):
         """."""
         
         #FIXME: are client sockets non-blocking?
         socket.socket.__init__(self, socket.AF_INET, socket.SOCK_STREAM)
-        
-        if address:
-            self.connect(address)
 
     def __enter__(self):
         self.connect()
         return self
         
     def __exit__(self, exc_type, exc_value, traceback):
-        self.disconnect()
+        self.close()
+        
+    def _handshake(self):
+        """."""
+        # FIXME: why does adb_client.c decrement VERSION_SERVER before
+        # Check server version & restart if necessary
+        if int(self.query('version'), 16) != VERSION_SERVER:
+            raise ADBError('old version')
     
     #FIXME: see _adb_connect()/adb_connect() in adb_client.c
     def connect(self, address=(SERVER_HOST, SERVER_PORT)):
@@ -127,13 +131,7 @@ class ClientSocket(socket.socket):
         
         try:
             socket.socket.connect(self, address)
-                
-            # FIXME: why does adb_client.c decrement VERSION_SERVER before
-            # Check server version & restart if necessary
-            self.sendmsg('version')
-                
-            if int(self.recvmsg(), 16) != VERSION_SERVER:
-                raise ADBError('server version too old')
+            self._handshake()
                 
         # Try starting the server
         except ConnectionRefusedError:
@@ -145,7 +143,7 @@ class ClientSocket(socket.socket):
             
         # Try restarting the server
         except ADBError:
-            self.sendmsg('kill')
+            self.command('kill')
             time.sleep(2)
             subprocess.check_output(['adb', 'start-server'])
             time.sleep(3)
@@ -153,20 +151,26 @@ class ClientSocket(socket.socket):
             # Give it another try
             socket.socket.connect(self, address)
             
-            self.sendmsg('version')
+            self.command('version')
             
             if int(self.recvmsg(), 16) != VERSION_SERVER:
                 raise
             
     #FIXME: check
     def recv(self, size):
-        """A simple buffered wrapper around socket.recv()."""
+        """Receive data from the socket.
+        
+        A convenience wrapper around socket.recv() that will retry on
+        InterruptedError (EINTR) and incomplete receive.  Returns the bytes
+        received on success; raises BrokenPipeError on fail.
+        
+        *data* should be a properly formatted ADB message."""
         
         total_received = b''
         
         while len(total_received) < size:
             try:
-                received = socket.socket.recv(self, size - len(data))
+                received = socket.socket.recv(self, size - len(total_received))
             
                 if received == b'':
                     self.close()
@@ -178,32 +182,6 @@ class ClientSocket(socket.socket):
                 pass
         else:
             return total_received
-    
-    #FIXME: doc
-    def recvmsg(self):
-        """Receive a response from the server.
-
-        Responses from the server are in the form of a 4-byte return status,
-        followed by a 4-byte hex length and finally the payload if hex length is
-        greater than 0.
-
-        If the return status is b'FAIL' ADBError will be raised accompanied by the
-        error message.
-
-        If the return status is b'OKAY' recv() will return a bytestring.
-        """
-        
-        status = self.recv(4)
-        size = int(self.recv(4), 16)
-        
-        #
-        if status == b'OKAY':
-            return self.recv(size)
-        #
-        elif status == b'FAIL':
-            raise ADBError(self.recv(size))
-        else:
-            raise ADBError('protocol fault')
             
     #FIXME: doc & test
     def send(self, data):
@@ -231,8 +209,8 @@ class ClientSocket(socket.socket):
         else:
             return total_sent
         
-    #FIXME: better naming scheme
-    def sendmsg(self, data, host=HOST_ANY, serialno=None):
+    #FIXME: doc
+    def command(self, data, host=HOST_ANY, serialno=None):
         """Send a formatted request to the server.
 
         ADB clients send requests as a 4-byte hexadecimal length followed by
@@ -245,16 +223,45 @@ class ClientSocket(socket.socket):
         """
         
         if host == HOST_SERIAL:
-            data = b':'.join([host, serialno, data])
+            data = ':'.join([host, serialno, data])
         else:
-            data = b':'.join([host, data])
+            data = ':'.join([host, data])
             
         data = '{0:0>4x}{1}'.format(len(data), data).encode('ascii')
         
         return self.send(data)
+    
+    #FIXME: doc
+    def query(self, data, host=HOST_ANY, serialno=None):
+        """Send a request and receive a response from the server.
+
+        Responses from the server are in the form of a 4-byte return status,
+        followed by a 4-byte hex length and finally the payload if hex length is
+        greater than 0.
+
+        If the return status is b'FAIL' ADBError will be raised accompanied by the
+        error message.
+
+        If the return status is b'OKAY' recv() will return a bytestring.
+        """
+        
+        self.command(data=data, host=host, serialno=serialno)
+        
+        status = self.recv(4)
+        size = int(self.recv(4), 16)
+        
+        #
+        if status == b'OKAY':
+            return self.recv(size)
+        #
+        elif status == b'FAIL':
+            raise ADBError(self.recv(size))
+        else:
+            #FIXME: the error handling here is not much like adb_client.c
+            raise ADBError('protocol fault')
             
 
-class HostClient(ClientBase):
+class HostClient:
     """."""
     
     def version(self):
@@ -262,7 +269,7 @@ class HostClient(ClientBase):
         
         Returns an integer.
         """
-        self.sendmsg('version')
+        self.command('version')
         
         return int(self.recvmsg(), 16)
         
@@ -273,7 +280,7 @@ class HostClient(ClientBase):
         Returns a byte string that will be dumped as-is by the client.
         """
         
-        self.sendmsg('devices')
+        self.command('devices')
         
         return self.recvmsg()
         
@@ -284,7 +291,7 @@ class HostClient(ClientBase):
         running after an upgrade.
         """
         
-        self.sendmsg('kill')
+        self.command('kill')
         
         return self.recvmsg()
         
@@ -402,7 +409,7 @@ class HostClient(ClientBase):
         pass
         
             
-class LocalClient(ClientBase):
+class LocalClient:
     """."""
     
     #FIXME
@@ -564,9 +571,6 @@ class LocalServer(ServerBase):
         
         
 if __name__ == '__main__':
-    
-    with HostClient() as adbc:
-        #print('version: ' + str(adbc.version()))
-        print('devices: ' + str(adbc.devices()))
-        #print('kill: ' + str(adbc.kill()))
+    #TODO: implement a mock adb command-line compatible with the C version
+    pass
     

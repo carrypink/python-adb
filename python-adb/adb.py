@@ -118,7 +118,7 @@ class ClientSocket(socket.socket):
         """."""
         # FIXME: why does adb_client.c decrement VERSION_SERVER before
         # Check server version & restart if necessary
-        if int(self.query('version'), 16) != VERSION_SERVER:
+        if int(self.query('version'), 16) - 2 != VERSION_SERVER:
             raise ADBError('old version')
     
     #FIXME: see _adb_connect()/adb_connect() in adb_client.c
@@ -149,12 +149,9 @@ class ClientSocket(socket.socket):
             time.sleep(3)
             
             # Give it another try
-            socket.socket.connect(self, address)
+            #socket.socket.connect(self, address)
             
-            self.command('version')
-            
-            if int(self.recvmsg(), 16) != VERSION_SERVER:
-                raise
+            self._handshake()
             
     #FIXME: check
     def recv(self, size):

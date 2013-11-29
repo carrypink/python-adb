@@ -95,20 +95,21 @@ class ADBClientError(ADBError):
     pass
 
 
-# Client Classes
-###############################################################################    
-    
-class ClientBase:
-    """Base class for clients of the ADB Server."""
-    
-    socket = None
+# Socket Classes
+###############################################################################
+
+class ClientSocket(socket.socket):
+    """."""
     
     def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
         
-        if address:
-            self.connect(address=address)
+        #FIXME: are client sockets non-blocking?
+        socket.socket.__init__(self, socket.AF_INET, socket.SOCK_STREAM)
         
+        if address:
+            self.connect(address)
+
     def __enter__(self):
         self.connect()
         return self
@@ -118,71 +119,64 @@ class ClientBase:
     
     #FIXME: see _adb_connect()/adb_connect() in adb_client.c
     def connect(self, address=(SERVER_HOST, SERVER_PORT)):
-        """Connect to an ADB server.
+        """Connect the socket to an ADB server.
         
-        FIXME
+        If *start_server* is True connect() will try to start the ADB server
+        and retry once.
         """
         
-        if self.socket:
-            self.disconnect()
-            
-        retry = 3
-        
-        while retry:
-            try:
-                #FIXME: are client sockets non-blocking?
-                # Open a socket and connect to the server
-                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket.connect(address)
-                
-                # FIXME: why does adb_client.c decrement VERSION_SERVER before
-                # Check server version & restart if necessary
-                self.sendmsg('version')
-                
-                if int(self.recvmsg(), 16) != VERSION_SERVER:
-                    self.sendmsg('kill')
-                    time.sleep(2)
-                    subprocess.check_output(['adb', 'start-server'])
-                    
-                break
-            except ConnectionRefusedError:
-                #FIXME: use adb.HostServer()
-                subprocess.check_output(['adb', 'start-server'])
-                # give the server some time to start properly and detect devices
-                time.sleep(3)
-                retry -= 1
-        else:
-            raise ConnectionRefusedError("Could not connect to server.")
-
-    #FIXME: test, doc
-    def disconnect(self):
-        """."""
-        
         try:
-            if self.socket:
-                # I don't think adb calls shutdown() (naughty)
-                #self.socket.shutdown(socket.SHUT_RDWR)
-                self.socket.close()
-                self.socket = None
-        except:
-            self.socket = None
-            return
+            socket.socket.connect(self, address)
+                
+            # FIXME: why does adb_client.c decrement VERSION_SERVER before
+            # Check server version & restart if necessary
+            self.sendmsg('version')
+                
+            if int(self.recvmsg(), 16) != VERSION_SERVER:
+                raise ADBError('server version too old')
+                
+        # Try starting the server
+        except ConnectionRefusedError:
+            #TODO: use adb.HostServer()
+            subprocess.check_output(['adb', 'start-server'])
+            # give the server some time to start properly and detect devices
+            time.sleep(3)
+            socket.socket.connect(self, address)
             
-    #FIXME
+        except ADBError:
+            self.sendmsg('kill')
+            time.sleep(2)
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            
+            # Give it another try
+            socket.socket.connect(self, address)
+            
+            self.sendmsg('version')
+            
+            if int(self.recvmsg(), 16) != VERSION_SERVER:
+                raise
+            
+    #FIXME: check
     def recv(self, size):
         """A simple buffered wrapper around socket.recv()."""
         
-        data = b''
+        total_received = b''
         
-        while len(data) < size:
-            chunk = self.socket.recv(size - len(data))
+        while len(total_received) < size:
+            try:
+                received = socket.socket.recv(self, size - len(data))
             
-            if chunk == b'':
-                raise BrokenPipeError('connection closed')
+                if received == b'':
+                    self.close()
+                    raise BrokenPipeError('connection closed')
                 
-            data += chunk
+                total_received += received
+            except InterruptedError:
+                #FIXME: continue?
+                pass
         else:
-            return data
+            return total_received
     
     #FIXME: doc
     def recvmsg(self):
@@ -195,8 +189,7 @@ class ClientBase:
         If the return status is b'FAIL' ADBError will be raised accompanied by the
         error message.
 
-        If the return status is b'OKAY' recv() will return a bytestring
-        (possibly b'').
+        If the return status is b'OKAY' recv() will return a bytestring.
         """
         
         status = self.recv(4)
@@ -209,7 +202,7 @@ class ClientBase:
         elif status == b'FAIL':
             raise ADBError(self.recv(size))
         else:
-            raise ADBError('unknown protocol error')
+            raise ADBError('protocol fault')
             
     #FIXME: doc & test
     def send(self, data):
@@ -223,14 +216,12 @@ class ClientBase:
         """
         total_sent = 0
         
-        #DEBUG
-        print(data)
-        
         while total_sent < len(data):
             try:
-                sent = self.socket.send(data[total_sent:])
+                sent = socket.socket.send(self, data[total_sent:])
                 
                 if sent == 0:
+                    self.close()
                     raise BrokenPipeError('disconnected')
                 
                 total_sent += sent
@@ -239,6 +230,7 @@ class ClientBase:
         else:
             return total_sent
         
+    #FIXME: better naming scheme
     def sendmsg(self, data, host=HOST_ANY, serialno=None):
         """Send a formatted request to the server.
 

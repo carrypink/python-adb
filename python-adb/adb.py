@@ -143,6 +143,7 @@ class ClientSocket(socket.socket):
             time.sleep(3)
             socket.socket.connect(self, address)
             
+        # Try restarting the server
         except ADBError:
             self.sendmsg('kill')
             time.sleep(2)

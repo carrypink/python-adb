@@ -113,28 +113,37 @@ class ClientSocket(socket.socket):
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-        
+    
+    #FIXME  
     def check_status(self):
-        """adb_status() analog."""
+        """adb_status() analog.
+        
+        This is a pythonic analog to adb_client.c => adb_status() which raises
+        exceptions instead of using return statuses and error messages.
+        """
         try:
             status = self.recv(4)
         except BrokenPipeError:
             raise ADBError('protocol fault (no status)')
         
+        # Success; return as there may be no response
         if status == b'OKAY':
             return
+            
+        # Failure
         elif status == b'FAIL':
             try:
                 size = int(self.recv(4), 16)
             except BrokenPipeError:
                 raise ADBError('protocol fault (status len)')
                 
-                try:
-                    fail_str = self.recv(size)
-                except:
-                    raise
+            try:
+                fail_str = self.recv(size)
+            except:
+                raise ADBError('protocol fault (status read)')
                 
-            raise ADBError(self.recv(size))
+            raise ADBError(fail_str)
+        # Unknown status
         else:
             raise ADBError('protocol fault (status ' + str(status) + '?!)')
         

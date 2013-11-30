@@ -114,6 +114,30 @@ class ClientSocket(socket.socket):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
         
+    def check_status(self):
+        """adb_status() analog."""
+        try:
+            status = self.recv(4)
+        except BrokenPipeError:
+            raise ADBError('protocol fault (no status)')
+        
+        if status == b'OKAY':
+            return
+        elif status == b'FAIL':
+            try:
+                size = int(self.recv(4), 16)
+            except BrokenPipeError:
+                raise ADBError('protocol fault (status len)')
+                
+                try:
+                    fail_str = self.recv(size)
+                except:
+                    raise
+                
+            raise ADBError(self.recv(size))
+        else:
+            raise ADBError('protocol fault (status ' + str(status) + '?!)')
+        
     def _kill_server(self):
         self.command('kill')
         time.sleep(2)

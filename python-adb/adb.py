@@ -101,51 +101,10 @@ class ADBClientError(ADBError):
 class ClientSocket(socket.socket):
     """."""
     
-    def __init__(self, address=(SERVER_HOST, SERVER_PORT), ):
+    def __init__(self):
         """."""
-        
         #FIXME: are client sockets non-blocking?
         socket.socket.__init__(self, socket.AF_INET, socket.SOCK_STREAM)
-
-    def __enter__(self):
-        self.connect()
-        return self
-        
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
-    
-    #FIXME  
-    def check_status(self):
-        """adb_status() analog.
-        
-        This is a pythonic analog to adb_client.c => adb_status() which raises
-        exceptions instead of using return statuses and error messages.
-        """
-        try:
-            status = self.recv(4)
-        except BrokenPipeError:
-            raise ADBError('protocol fault (no status)')
-        
-        # Success; return as there may be no response
-        if status == b'OKAY':
-            return
-            
-        # Failure
-        elif status == b'FAIL':
-            try:
-                size = int(self.recv(4), 16)
-            except BrokenPipeError:
-                raise ADBError('protocol fault (status len)')
-                
-            try:
-                fail_str = self.recv(size)
-            except:
-                raise ADBError('protocol fault (status read)')
-                
-            raise ADBError(fail_str)
-        # Unknown status
-        else:
-            raise ADBError('protocol fault (status ' + str(status) + '?!)')
         
     def _kill_server(self):
         self.command('kill')
@@ -161,55 +120,23 @@ class ClientSocket(socket.socket):
         # Check server version & restart if necessary
         if int(self.query('version'), 16) - 1 != VERSION_SERVER:
             raise ADBError('old version')
-    
-    #FIXME: see _adb_connect()/adb_connect() in adb_client.c
-    def connect(self, address=(SERVER_HOST, SERVER_PORT)):
-        """Connect the socket to an ADB server.
-        
-        If *start_server* is True connect() will try to start the ADB server
-        and retry once.
-        """
-        
-        try:
-            socket.socket.connect(self, address)
-            self._handshake()
             
-        # Old server still running
-        except ADBError:
-            self.command('kill')
-            time.sleep(2)
-            
-            subprocess.check_output(['adb', 'start-server'])
-            time.sleep(3)
-            #socket.socket.connect(self, address)
-            
-            #FIXME self._handshake()
-                
-        # Server not running
-        except ConnectionRefusedError:
-            #TODO: use adb.HostServer()
-            subprocess.check_output(['adb', 'start-server'])
-            # give the server some time to start properly and detect devices
-            time.sleep(3)
-            socket.socket.connect(self, address)
-            
-            self._handshake()
-            
-    #FIXME: check
-    def recv(self, size):
+    def recv(self, bufsize):
         """Receive data from the socket.
         
-        A convenience wrapper around socket.recv() that will retry on
-        InterruptedError (EINTR) and incomplete receive.  Returns the bytes
-        received on success; raises BrokenPipeError on fail.
+        A wrapper around socket.recv() that will retry on InterruptedError
+        (EINTR) and incomplete receive.  Returns the bytes received on success;
+        raises BrokenPipeError on fail.
         
-        *data* should be a properly formatted ADB message."""
+        The return value is a bytes object representing the data received.  The
+        maximum amount of data to be received at once is specified by bufsize.
+        """
         
         total_received = b''
         
-        while len(total_received) < size:
+        while len(total_received) < bufsize:
             try:
-                received = socket.socket.recv(self, size - len(total_received))
+                received = socket.socket.recv(self, bufsize - len(total_received))
             
                 if received == b'':
                     self.close()
@@ -217,12 +144,10 @@ class ClientSocket(socket.socket):
                 
                 total_received += received
             except InterruptedError:
-                #FIXME: continue?
                 pass
         else:
             return total_received
             
-    #FIXME: doc & test
     def send(self, data):
         """Send data to the socket.
         
@@ -234,15 +159,13 @@ class ClientSocket(socket.socket):
         """
         total_sent = 0
         
-        print(data)
-        
         while total_sent < len(data):
             try:
                 sent = socket.socket.send(self, data[total_sent:])
                 
                 if sent == 0:
                     self.close()
-                    raise BrokenPipeError('disconnected')
+                    raise BrokenPipeError('connection closed')
                 
                 total_sent += sent
             except InterruptedError:
@@ -291,15 +214,68 @@ class ClientSocket(socket.socket):
         status = self.recv(4)
         size = int(self.recv(4), 16)
         
-        #
+        self.status()
+        
+        
+class ClientBase:
+    """."""
+    
+    def __init__(self, address=None):
+        pass
+    
+    #TODO: better comments and doc  
+    def status(self):
+        """adb_status() analog.
+        
+        This is a pythonic analog to adb_client.c => adb_status() which raises
+        exceptions instead of using return statuses and error messages.
+        """
+        try:
+            status = self.recv(4)
+        except BrokenPipeError:
+            raise ADBError('protocol fault (no status)')
+        
+        # Success; return as some queries have no response
         if status == b'OKAY':
-            return self.recv(size)
-        #
+            return
+        # Failure
         elif status == b'FAIL':
-            raise ADBError(self.recv(size))
+            try:
+                size = int(self.recv(4), 16)
+            except BrokenPipeError:
+                raise ADBError('protocol fault (status len)')
+                
+            try:
+                fail_str = self.recv(size)
+            except:
+                raise ADBError('protocol fault (status read)')
+                
+            raise ADBError(fail_str)
+        # Unknown status
         else:
-            #FIXME: the error handling here is not much like adb_client.c
-            raise ADBError('protocol fault')
+            raise ADBError('protocol fault (status ' + str(status) + '?!)')
+            
+    def connect(self, address=(SERVER_HOST, SERVER_PORT)):
+        """Connect to an ADB server."""
+        
+        self.socket = ClientSocket()
+        
+        try:
+            self.socket.connect(address)
+            
+        # Try starting the server
+        except ConnectionRefusedError:
+            self.socket.close()
+            subprocess.check_call(['adb', 'start-server'])
+            time.sleep(3)
+            self.socket.connect(address)
+            
+        except ADBError:
+            pass
+            
+    def command(self, service):
+        """."""
+        pass
             
 
 class HostClient:

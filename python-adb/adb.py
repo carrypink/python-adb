@@ -38,25 +38,7 @@ SERVER_PORT = 5037
 #FIXME: rather unpythonic
 VERSION_MAJOR = 1
 VERSION_MINOR = 0
-VERSION_SERVER = 29
-
-#FIXME: need these?
-MSG_SYNC = 0x434e5953
-MSG_CNXN = 0x4e584e43
-MSG_OPEN = 0x4e45504f
-MSG_OKAY = 0x59414b4f
-MSG_CLSE = 0x45534c43
-MSG_WRTE = 0x45545257
-MSG_STAT = 0x54415453
-MSG_LIST = 0x5453494c
-MSG_ULNK = 0x4b4e4c55
-MSG_SEND = 0x444e4553
-MSG_RECV = 0x56434552
-MSG_DENT = 0x544e4544
-MSG_DONE = 0x454e4f44
-MSG_DATA = 0x41544144
-MSG_FAIL = 0x4c494146
-MSG_QUIT = 0x54495551
+VERSION_SERVER = 30
 
 #FIXME: better desc.
 HOST_ANY = 'host'
@@ -99,9 +81,9 @@ class ADBClientError(ADBError):
 ###############################################################################
 
 class ClientSocket(socket.socket):
-    """."""
+    """ClientSocket - An asocket analog."""
     
-    def __init__(self, address=(SERVER_HOST, SERVER_PORT), ):
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
         
         #FIXME: are client sockets non-blocking?
@@ -114,8 +96,8 @@ class ClientSocket(socket.socket):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
     
-    #FIXME  
-    def check_status(self):
+    #FIXME
+    def _status(self):
         """adb_status() analog.
         
         This is a pythonic analog to adb_client.c => adb_status() which raises
@@ -146,23 +128,7 @@ class ClientSocket(socket.socket):
         # Unknown status
         else:
             raise ADBError('protocol fault (status ' + str(status) + '?!)')
-        
-    def _kill_server(self):
-        self.command('kill')
-        time.sleep(2)
-        
-    def _start_server(self):
-        subprocess.check_output(['adb', 'start-server'])
-        time.sleep(3)
-        
-    def _handshake(self):
-        """."""
-        # FIXME: why does adb_client.c decrement VERSION_SERVER before
-        # Check server version & restart if necessary
-        if int(self.query('version'), 16) - 1 != VERSION_SERVER:
-            raise ADBError('old version')
     
-    #FIXME: see _adb_connect()/adb_connect() in adb_client.c
     def connect(self, address=(SERVER_HOST, SERVER_PORT)):
         """Connect the socket to an ADB server.
         
@@ -172,30 +138,29 @@ class ClientSocket(socket.socket):
         
         try:
             socket.socket.connect(self, address)
-            self._handshake()
+            # FIXME: why does adb_client.c decrement VERSION_SERVER?
+            if int(self.query('version'), 16) - 1 > VERSION_SERVER: # returns 0x001f (31)
+                raise ADBError('adb server is out of date.  killing...')
             
         # Old server still running
         except ADBError:
             self.command('kill')
             time.sleep(2)
             
+            # give the server some time to start properly and detect devices
             subprocess.check_output(['adb', 'start-server'])
             time.sleep(3)
-            #socket.socket.connect(self, address)
             
-            #FIXME self._handshake()
+            self.connect(address=address)
                 
         # Server not running
         except ConnectionRefusedError:
-            #TODO: use adb.HostServer()
-            subprocess.check_output(['adb', 'start-server'])
             # give the server some time to start properly and detect devices
+            subprocess.check_output(['adb', 'start-server'])
             time.sleep(3)
-            socket.socket.connect(self, address)
             
-            self._handshake()
+            self.connect(address=address)
             
-    #FIXME: check
     def recv(self, size):
         """Receive data from the socket.
         
@@ -217,12 +182,10 @@ class ClientSocket(socket.socket):
                 
                 total_received += received
             except InterruptedError:
-                #FIXME: continue?
                 pass
         else:
             return total_received
             
-    #FIXME: doc & test
     def send(self, data):
         """Send data to the socket.
         
@@ -233,8 +196,6 @@ class ClientSocket(socket.socket):
         *data* should be a properly formatted ADB message.
         """
         total_sent = 0
-        
-        print(data)
         
         while total_sent < len(data):
             try:
@@ -268,9 +229,7 @@ class ClientSocket(socket.socket):
         else:
             data = ':'.join([host, data])
             
-        data = '{0:0>4x}{1}'.format(len(data), data).encode('ascii')
-        
-        return self.send(data)
+        self.send('{0:0>4x}{1}'.format(len(data), data).encode('ascii'))
     
     #FIXME: doc
     def query(self, data, host=HOST_ANY, serialno=None):
@@ -287,19 +246,11 @@ class ClientSocket(socket.socket):
         """
         
         self.command(data=data, host=host, serialno=serialno)
+        print('DONE')
+        self._status()
+        print('DONE2')
         
-        status = self.recv(4)
-        size = int(self.recv(4), 16)
-        
-        #
-        if status == b'OKAY':
-            return self.recv(size)
-        #
-        elif status == b'FAIL':
-            raise ADBError(self.recv(size))
-        else:
-            #FIXME: the error handling here is not much like adb_client.c
-            raise ADBError('protocol fault')
+        return self.recv(int(self.recv(4), 16))
             
 
 class HostClient:
@@ -314,16 +265,21 @@ class HostClient:
         
         return int(self.recvmsg(), 16)
         
-    #FIXME: long, conn closed after, format response
+    #FIXME: format output
     def devices(self, long=False):
         """Ask to return the list of available Android devices and their state.
         
         Returns a byte string that will be dumped as-is by the client.
         """
         
-        self.command('devices')
-        
-        return self.recvmsg()
+        with ClientSocket() as sock:
+            print('connected')
+            if long:
+                response = sock.query('devices-l')
+            else:
+                response = sock.query('devices')
+            
+        return response
         
     def kill(self):
         """Ask the ADB server to quit immediately.

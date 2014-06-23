@@ -80,86 +80,23 @@ class ADBClientError(ADBError):
 # Socket Classes
 ###############################################################################
 
-class ClientSocket(socket.socket):
-    """ClientSocket - An asocket analog."""
+class Socket(socket.socket):
+    """Socket - An asocket analog."""
     
     def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
         """."""
         
         #FIXME: are client sockets non-blocking?
         socket.socket.__init__(self, socket.AF_INET, socket.SOCK_STREAM)
+        
+        self.address = address
 
     def __enter__(self):
-        self.connect()
+        self.connect(self.address)
         return self
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-    
-    #FIXME
-    def _status(self):
-        """adb_status() analog.
-        
-        This is a pythonic analog to adb_client.c => adb_status() which raises
-        exceptions instead of using return statuses and error messages.
-        """
-        try:
-            status = self.recv(4)
-        except BrokenPipeError:
-            raise ADBError('protocol fault (no status)')
-        
-        # Success; return as there may be no response
-        if status == b'OKAY':
-            return
-            
-        # Failure
-        elif status == b'FAIL':
-            try:
-                size = int(self.recv(4), 16)
-            except BrokenPipeError:
-                raise ADBError('protocol fault (status len)')
-                
-            try:
-                fail_str = self.recv(size)
-            except:
-                raise ADBError('protocol fault (status read)')
-                
-            raise ADBError(fail_str)
-        # Unknown status
-        else:
-            raise ADBError('protocol fault (status ' + str(status) + '?!)')
-    
-    def connect(self, address=(SERVER_HOST, SERVER_PORT)):
-        """Connect the socket to an ADB server.
-        
-        If *start_server* is True connect() will try to start the ADB server
-        and retry once.
-        """
-        
-        try:
-            socket.socket.connect(self, address)
-            # FIXME: why does adb_client.c decrement VERSION_SERVER?
-            if int(self.query('version'), 16) - 1 > VERSION_SERVER: # returns 0x001f (31)
-                raise ADBError('adb server is out of date.  killing...')
-            
-        # Old server still running
-        except ADBError:
-            self.command('kill')
-            time.sleep(2)
-            
-            # give the server some time to start properly and detect devices
-            subprocess.check_output(['adb', 'start-server'])
-            time.sleep(3)
-            
-            self.connect(address=address)
-                
-        # Server not running
-        except ConnectionRefusedError:
-            # give the server some time to start properly and detect devices
-            subprocess.check_output(['adb', 'start-server'])
-            time.sleep(3)
-            
-            self.connect(address=address)
             
     def recv(self, size):
         """Receive data from the socket.
@@ -210,8 +147,98 @@ class ClientSocket(socket.socket):
                 pass
         else:
             return total_sent
+    
+    #FIXME
+    def status(self):
+        """adb_status() analog.
         
-    #FIXME: don't like
+        This is a pythonic analog to adb_client.c => adb_status() which raises
+        exceptions instead of using return statuses and error messages.
+        """
+        try:
+            status = self.recv(4)
+        except BrokenPipeError:
+            raise ADBError('protocol fault (no status)')
+        
+        # Success; return as there may be no response
+        if status == b'OKAY':
+            return
+            
+        # Failure
+        elif status == b'FAIL':
+            try:
+                size = int(self.recv(4), 16)
+            except BrokenPipeError:
+                raise ADBError('protocol fault (status len)')
+                
+            try:
+                fail_str = self.recv(size)
+            except:
+                raise ADBError('protocol fault (status read)')
+                
+            raise ADBError(fail_str)
+        # Unknown status
+        else:
+            raise ADBError('protocol fault (status ' + str(status) + '?!)')
+            
+            
+            
+            
+#FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#            
+#FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#            
+#FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#
+
+class Client:
+    """Client - An adb_client analog."""
+    
+    def __init__(self, address=(SERVER_HOST, SERVER_PORT)):
+        """."""
+        
+        self.address = address
+        self.host = host
+        self.serialno = serialno
+        self.socket = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+        
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+    
+    def connect(self, address=(SERVER_HOST, SERVER_PORT)):
+        """Connect the socket to an ADB server.
+        
+        If *start_server* is True connect() will try to start the ADB server
+        and retry once.
+        """
+        
+        try:
+            socket.socket.connect(self, address)
+            # FIXME: why does adb_client.c decrement VERSION_SERVER?
+            if int(self.query('version'), 16) - 1 > VERSION_SERVER: # returns 0x001f (31)
+                raise ADBError('adb server is out of date.  killing...')
+            
+        # Old server still running
+        except ADBError:
+            self.command('kill')
+            time.sleep(2)
+            
+            # give the server some time to start properly and detect devices
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            
+            self.connect(address=address)
+                
+        # Server not running
+        except ConnectionRefusedError:
+            # give the server some time to start properly and detect devices
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            
+            self.connect(address=address)
+        
+    #FIXME: doc
     def command(self, data, host=HOST_ANY, serialno=None):
         """Send a formatted request to the server.
 
@@ -223,6 +250,34 @@ class ClientSocket(socket.socket):
         *host* should be one of the HOST_* constants described above.  If
         *host* is HOST_SERIAL *serialno* must not be None.
         """
+        
+        try:
+            with Socket as sock:
+                sock.send('000chost:version')
+                sock.status()
+                
+                # FIXME: why does adb_client.c decrement VERSION_SERVER?
+                if int(sock.recv(4), 16) - 1 > VERSION_SERVER: # returns 0x001f (31)
+                    raise ADBError()
+        
+        # Old server still running
+        except ADBError:
+            self.command('kill')
+            time.sleep(2)
+            
+            # give the server some time to start properly and detect devices
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            
+            self.command(data=data, host=host, serialno=serialno)
+                
+        # Server not running
+        except ConnectionRefusedError:
+            # give the server some time to start properly and detect devices
+            subprocess.check_output(['adb', 'start-server'])
+            time.sleep(3)
+            
+            self.command(data=data, host=host, serialno=serialno)
         
         if host == HOST_SERIAL:
             data = ':'.join([host, serialno, data])
@@ -246,9 +301,7 @@ class ClientSocket(socket.socket):
         """
         
         self.command(data=data, host=host, serialno=serialno)
-        print('DONE')
-        self._status()
-        print('DONE2')
+        self.status()
         
         return self.recv(int(self.recv(4), 16))
             

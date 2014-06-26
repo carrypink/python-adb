@@ -31,8 +31,7 @@ import time
 # Constants
 ###############################################################################
 
-#FIXME: adb_client.c uses socket.ADDR_LOOPBACK
-SERVER_HOST = 'localhost'
+SERVER_HOST = socket.INADDR_LOOPBACK
 SERVER_PORT = 5037
 
 #FIXME: rather unpythonic

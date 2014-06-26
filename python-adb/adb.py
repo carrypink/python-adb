@@ -221,10 +221,27 @@ class Socket(socket.socket):
             service = ':'.join([host, data])
             
         self.send('{0:0>4x}{1}'.format(len(service), service).encode('ascii'))
+    
+    #FIXME: doc
+    def query(self, data, host=HOST_ANY, serialno=None):
+        """Send a request and receive a response from the server.
+
+        Responses from the server are in the form of a 4-byte return status,
+        followed by a 4-byte hex length and finally the payload if hex length is
+        greater than 0.
+
+        If the return status is b'FAIL' ADBError will be raised accompanied by the
+        error message.
+
+        If the return status is b'OKAY' recv() will return a bytestring.
+        """
+        
+        self.command(data=data, host=host, serialno=serialno)
+        self.status()
+        
+        return self.recv(int(self.recv(4), 16))
             
-            
-            
-            
+
 #FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#            
 #FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#            
 #FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME#
@@ -246,25 +263,6 @@ class Client:
         
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
-    
-    #FIXME: doc
-    def query(self, data, host=HOST_ANY, serialno=None):
-        """Send a request and receive a response from the server.
-
-        Responses from the server are in the form of a 4-byte return status,
-        followed by a 4-byte hex length and finally the payload if hex length is
-        greater than 0.
-
-        If the return status is b'FAIL' ADBError will be raised accompanied by the
-        error message.
-
-        If the return status is b'OKAY' recv() will return a bytestring.
-        """
-        
-        self.command(data=data, host=host, serialno=serialno)
-        self.status()
-        
-        return self.recv(int(self.recv(4), 16))
             
 
 class HostClient(Client):

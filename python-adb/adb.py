@@ -93,6 +93,21 @@ class Socket(socket.socket):
     def _status(self):
         """adb_status() analog.
         
+        The server should answer a request with one of the following:
+
+            1. For success, the 4-byte "OKAY" string
+
+            2. For failure, the 4-byte "FAIL" string, followed by a
+               4-byte hex length, followed by a string giving the reason
+               for failure.
+
+            3. As a special exception, for 'host:version', a 4-byte
+               hex string corresponding to the server's internal version number
+
+        Note that the connection is still alive after an OKAY, which allows the
+        client to make other requests. But in certain cases, an OKAY will even
+        change the state of the connection. 
+        
         This is a pythonic analog to adb_client.c => adb_status() which raises
         exceptions instead of using return statuses and error messages.
         """
